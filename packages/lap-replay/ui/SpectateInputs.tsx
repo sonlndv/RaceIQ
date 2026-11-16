@@ -143,7 +143,7 @@ const balanceMetricFor = (reading: SpectateReading | null): AnalysisTelemetryMet
 const tractionMetric = pair.gameId === "ams2" ? AMS2_TRACTION_METRIC : analysis.traction;
 const balanceA = tractionA ? resolveBalance(tractionA, balanceMetricFor(tractionA)) : null;
 const balanceB = tractionB ? resolveBalance(tractionB, balanceMetricFor(tractionB)) : null;
-const deltaChannel = useMemo<SpectateChannel | null>(() => pair.b && pair.comparison.traces && pair.comparison.timeDelta
+const deltaChannel = useMemo<SpectateChannel | null>(() => pair.b && !pair.a.alignmentUnavailable && !pair.b.alignmentUnavailable && pair.comparison.traces && pair.comparison.timeDelta
   ? ({
       id: "comparison.time-delta",
       label: "Time delta",

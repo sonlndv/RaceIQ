@@ -456,6 +456,7 @@
         "@hono/zod-validator": "0.9.1",
         "@raceiq/analysis-core": "workspace:*",
         "@raceiq/backend-core": "workspace:*",
+        "@raceiq/capture-formats": "workspace:*",
         "@raceiq/scene-3d": "workspace:*",
         "@raceiq/shared": "workspace:*",
         "@raceiq/telemetry-core": "workspace:*",

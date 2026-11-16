@@ -6,7 +6,10 @@ import type { SemanticLapTelemetry, SemanticReplayFrame } from "../contracts/rep
 import { hasTelemetryGap, recordedTelemetryGapSeconds } from "./telemetry-gap"
 import type { OpponentSemanticLapTelemetry } from "../contracts/opponents"
 import type { SpectateController, SpectateLap, SpectatePose, SpectateReading, SpectateSample, SpectateSnapshot } from "../contracts/spectate";
+import { createCaptureClock } from "../contracts/replay-evidence";
+import type { ReplayEvent } from "../contracts/replay-evidence";
 const OPPONENT_SAMPLE_GAP_SECONDS = 0.3;
+const F1_POSE_IDS = ["motion.position-x", "motion.position-y", "motion.position-z", "motion.yaw"] as const;
 function isOpponentReplay(replay: SemanticLapTelemetry | OpponentSemanticLapTelemetry): replay is OpponentSemanticLapTelemetry {
   return "opponentLapId" in replay;
 }
@@ -80,7 +83,21 @@ export function prepareSpectateLap(replay: SemanticLapTelemetry | OpponentSemant
   const maximumGapSeconds = !isOpponentReplay(replay) && replay.envelopes[0]?.simulator === "ams2"
     ? recordedTelemetryGapSeconds(replay.envelopes.map(frame => frame.observedAt.milliseconds))
     : undefined;
-  const traces = comparison?.traces;
+  let lastNative: number | null = null;
+  let lastObserved: SemanticReplayFrame["observedAt"] | undefined;
+  let hasClockReset = "evidence" in replay && !!replay.evidence?.runs.some(run => run.reason === "clock-reset");
+  for (const frame of replay.envelopes) {
+    const entry = frame.values.find(item => item.semanticId === "timing.current-lap");
+    const native = entry && validEntry(entry) ? number(entry.value) : null;
+    if (lastObserved?.domain === frame.observedAt.domain && frame.observedAt.milliseconds < lastObserved.milliseconds - 1) hasClockReset = true;
+    lastObserved = frame.observedAt;
+    if (native !== null && lastNative !== null && native < lastNative - 0.001) hasClockReset = true;
+    if (native !== null) lastNative = native;
+  }
+  // Distance registration assumes one traversal. Never fit a rewound attempt to
+  // that grid; retain every captured run on its own native path instead.
+  const alignmentUnavailable = hasClockReset ? "Distance alignment and pace deltas unavailable: this capture contains a native clock reset. Both recordings remain playable on capture time." : undefined;
+  const traces = alignmentUnavailable ? undefined : comparison?.traces;
   const elapsed = traces ? (side === "a" ? traces.elapsedTimeA : traces.elapsedTimeB) : [];
   const aligned: Array<{ time: number; distance: number; first: number; last: number }> = [];
   for (let index = 0; index < elapsed.length; index++) {
@@ -143,26 +160,54 @@ export function prepareSpectateLap(replay: SemanticLapTelemetry | OpponentSemant
     break;
   }
   let traveledOrigin: number | null = null,
-    previousTime = -Infinity,
-    run = 0,
     maxDistance = 0;
   const samples: SpectateSample[] = [];
+  const events: Array<ReplayEvent & { time: number | null; run: number | null }> = [];
+  const captureClock = createCaptureClock(isOpponentReplay(replay) ? OPPONENT_SAMPLE_GAP_SECONDS + 0.001 : (maximumGapSeconds ?? 0.1) + 0.001, replay.envelopes[0]?.simulator === "f1-2025");
   let previousSequence: number | null = null;
-  for (const frame of replay.envelopes) {
-    const sourceGap = frame.simulator === "lmu" && previousSequence !== null && frame.sequence > previousSequence + 1;
-    if (sourceGap || (frame.simulator === "lmu" && previousSequence !== null && frame.sequence <= previousSequence)) run++;
+  let poseBeforeBreak: Readonly<Record<string, unknown>> | null = null;
+  const evidence = "evidence" in replay ? replay.evidence : undefined;
+  const resetFrames = new Set(evidence?.runs.filter(run => run.reason === "clock-reset").map(run => run.startFrame));
+  const gapFrames = new Set(evidence?.runs.filter(run => run.reason === "capture-gap").map(run => run.startFrame));
+  const sourceEvents = new Map<number, ReplayEvent[]>();
+  for (const event of evidence?.events ?? []) {
+    if (event.frameIndex === null) { events.push({ ...event, time: null, run: null }); continue; }
+    const list = sourceEvents.get(event.frameIndex) ?? [];
+    list.push(event);
+    sourceEvents.set(event.frameIndex, list);
+  }
+  for (const [frameIndex, frame] of replay.envelopes.entries()) {
+    const sourceGap = gapFrames.has(frameIndex) || frame.simulator === "lmu" && previousSequence !== null && frame.sequence !== previousSequence + 1;
     previousSequence = frame.sequence;
     const native = readNumber(frame, "timing.current-lap");
     const observed = firstObserved && frame.observedAt.domain === firstObserved.domain ? (frame.observedAt.milliseconds - firstObserved.milliseconds) / 1000 : null;
-    const time = useObservedInterval ? observed : native !== null && native >= 0 && nativeOrigin !== null ? native - nativeOrigin : observed;
-    if (time === null || !Number.isFinite(time) || time < 0) {
-      run++;
-      continue;
+    const nativeElapsed = !useObservedInterval && native !== null && native >= 0 && nativeOrigin !== null ? native - nativeOrigin : null;
+    const forcedReset = resetFrames.has(frameIndex);
+    const clock = captureClock(nativeElapsed, observed, sourceGap, forcedReset);
+    const { run } = clock;
+    // F1 emits independent native channel updates at the same lap tick. Keep
+    // each packet seekable, without changing its original native lap time.
+    const time = frame.simulator === "f1-2025" && samples.length && clock.time <= samples.at(-1)!.time
+      ? samples.at(-1)!.time + 0.000001 : clock.time;
+    if (clock.reason && !sourceEvents.get(frameIndex)?.some(event => event.kind === "capture-gap" || event.kind === "flashback")) {
+      events.push({
+        kind: clock.reason === "clock-reset" ? "flashback" : "capture-gap", frameIndex, time, run,
+        reason: clock.reason === "clock-reset" ? "Native lap clock reset (rewind or lap boundary); separate captured run." : "Capture gap; no interpolation across missing evidence.",
+        source: clock.reason === "clock-reset" ? "Recorded native lap/observation clock" : "Recorded timestamps or source sequence",
+      });
     }
-    // A reset starts another lap/interval. Do not splice it into this recording.
-    if (time < previousTime - 0.001) break;
-if (hasSourceAwareGap(previousTime, time, isOpponentReplay(replay), maximumGapSeconds)) run++;
+    for (const event of sourceEvents.get(frameIndex) ?? []) events.push({ ...event, time, run });
     const values = frameValues(frame);
+    const previous = samples.at(-1);
+    if (frame.simulator === "f1-2025" && previous && previous.run !== run) {
+      poseBeforeBreak = previous.frame ? frameValues(previous.frame) : previous.values;
+    }
+    if (frame.simulator === "f1-2025" && poseBeforeBreak) {
+      // A lap/event packet can still carry the pre-flashback held motion state.
+      // Do not draw a teleport from that stale pose to the next actual update.
+      if (poseOf(values) && F1_POSE_IDS.some(key => values[key] !== poseBeforeBreak![key])) poseBeforeBreak = null;
+      else for (const key of F1_POSE_IDS) values[key] = null;
+    }
     const traveled = number(values["timing.distance-traveled"]);
     let distance = NaN;
     const index = lowerBound(aligned, time, (point) => point.time);
@@ -179,11 +224,10 @@ if (hasSourceAwareGap(previousTime, time, isOpponentReplay(replay), maximumGapSe
     const x = number(values["motion.position-x"]), z = number(values["motion.position-z"]);
     if (x !== null && z !== null) distance = projectDistance(time, index, x, z) ?? distance;
     if (Number.isFinite(distance)) maxDistance = Math.max(maxDistance, distance);
-    const sample = { time, distance, run, values, frame };
+    const sample = { time, nativeTime: native, frameIndex, distance, run, values, frame };
     // Coalesced ticks replace the same instant, without creating a zero interval.
     if (samples.at(-1)?.time === time) samples[samples.length - 1] = sample;
     else samples.push(sample);
-    previousTime = time;
   }
   // F1 lap-data and motion arrive independently. A held pose on a new lap tick
   // is not a stop: retain its telemetry, but interpolate motion to the next update.
@@ -202,7 +246,7 @@ if (hasSourceAwareGap(previousTime, time, isOpponentReplay(replay), maximumGapSe
     if (sample.distance > lastDistance) progressCount++;
     lastDistance = sample.distance;
   }
-  return { samples, motionSamples, maximumGapSeconds, duration: samples.at(-1)?.time ?? 0, distance: maxDistance, hasProgress: monotonic && progressCount > 1 && (traces ? aligned.length > 1 : trustworthy), replay };
+  return { samples, motionSamples, events, alignmentUnavailable, maximumGapSeconds, duration: samples.at(-1)?.time ?? 0, distance: maxDistance, hasProgress: !alignmentUnavailable && monotonic && progressCount > 1 && (traces ? aligned.length > 1 : trustworthy), replay };
 }
 
 /** Vehicle sideslip estimate from ground-plane travel direction versus recorded heading. */
@@ -325,7 +369,7 @@ export function sampleLap(lap: SpectateLap, time: number, holdPose: boolean): Sp
   if (time > last.time) return holdPose ? { time: last.time, distance: Number.isFinite(last.distance) ? last.distance : null, pose: poseOf(last.values, opponent), values: {} } : null;
   const index = lowerBound(samples, time, (sample) => sample.time);
   const right = samples[index]!;
-  if (right.time === time) return { time, distance: Number.isFinite(right.distance) ? right.distance : null, pose: poseOf(right.values, opponent), values: right.values, frame: right.frame };
+  if (right.time === time) return { time, run: right.run, distance: Number.isFinite(right.distance) ? right.distance : null, pose: poseOf(right.values, opponent), values: right.values, frame: right.frame };
   const left = samples[index - 1];
 if (!left || left.run !== right.run || hasSourceAwareGap(left.time, right.time, opponent, lap.maximumGapSeconds)) return null;
   const fraction = (time - left.time) / (right.time - left.time);
@@ -340,7 +384,7 @@ if (!left || left.run !== right.run || hasSourceAwareGap(left.time, right.time, 
     } else values[key] = interpolateShape(a, b, fraction);
   }
   const distance = Number.isFinite(left.distance) && Number.isFinite(right.distance) ? left.distance + (right.distance - left.distance) * fraction : null;
-  return { time, distance, pose: poseOf(values, opponent), values, frame: left.frame };
+  return { time, run: left.run, distance, pose: poseOf(values, opponent), values, frame: left.frame };
 }
 
 /** Equal-distance samples retain plateau departure; lowerBound still finds earliest arrival. */
@@ -519,7 +563,9 @@ const target = arrivalAt(aProgress, distance, isOpponentReplay(a.replay), a.maxi
       if (!lap) return;
       const frame = lap.replay.envelopes[frameIndex];
       if (!frame || lap.samples.length === 0 || disposed) return;
-      const index = lowerBound(lap.samples, frame.sequence, (sample) => sample.frame?.sequence ?? Infinity);
+      const index = lap.samples[0]?.frameIndex !== undefined
+        ? lowerBound(lap.samples, frameIndex, sample => sample.frameIndex ?? Infinity)
+        : lowerBound(lap.samples, frame.sequence, sample => sample.frame?.sequence ?? Infinity);
       const sample = lap.samples[Math.min(index, lap.samples.length - 1)]!;
       let target = sample.time;
       if (index < lap.samples.length && sample.frame !== frame) positionLock = false;

@@ -32,7 +32,18 @@ export const LIVE_GAME_SEMANTIC_IDS = {
     "motion.speed-limiter-active", "diagnostics.rear-flap-activated", "race.rear-flap-legal-status",
     "electronics.motor-map", "electronics.tc-cut-level", "diagnostics.migration", "weather.track-grip-level",
   ],
-  "f1-2025": ["aero.drs-active", "aero.drs-available", "damage.diffuser-damage", "damage.floor-damage", "damage.front-left-wing-damage", "damage.front-right-wing-damage", "damage.rear-wing-damage", "damage.sidepod-damage", "fuel.ers-deploy-mode", "fuel.ers-deployed", "fuel.ers-harvested", "fuel.ers-store-energy", "race.competitor.driver-name", "race.competitor.pit-status", "race.competitor.pit-stops", "race.competitor.position", "session.session-type", "timing.competitor.gap-to-ahead", "timing.competitor.gap-to-leader", "timing.sector.competitor-last.s1", "timing.sector.competitor-last.s2", "timing.sector.competitor-last.s3", "timing.total-laps", "tires.competitor.age", "tires.competitor.compound", "tires.tire-compound", "weather.rain-percent"],
+  "f1-2025": ["aero.drs-active", "aero.drs-available", "damage.diffuser-damage", "damage.floor-damage", "damage.front-left-wing-damage", "damage.front-right-wing-damage", "damage.rear-wing-damage", "damage.sidepod-damage", "fuel.ers-deploy-mode", "fuel.ers-deployed", "fuel.ers-harvested", "fuel.ers-store-energy", "race.competitor.driver-name", "race.competitor.pit-status", "race.competitor.pit-stops", "race.competitor.position", "session.session-type", "timing.competitor.gap-to-ahead", "timing.competitor.gap-to-leader", "timing.sector.competitor-last.s1", "timing.sector.competitor-last.s2", "timing.sector.competitor-last.s3", "timing.total-laps", "tires.competitor.age", "tires.competitor.compound", "tires.tire-compound", "weather.rain-percent",
+    "timing.competitor.last-lap-time", "timing.competitor.best-lap-time",
+    "race.competitor.car-index", "race.competitor.result-status",
+    "timing.competitor.epoch", "timing.competitor.lap-number", "timing.competitor.last-lap-number",
+    "timing.competitor.current-lap-valid", "timing.sector.competitor-current.index",
+    "timing.sector.competitor-current.s1", "timing.sector.competitor-current.s2",
+    "timing.current-lap-valid", "timing.lap-fraction", "diagnostics.timestamp-ms",
+    "timing.sector.current-index", "timing.sector.current-lap.s1", "timing.sector.current-lap.s2",
+    "timing.sector.last-lap.s1", "timing.sector.last-lap.s2", "timing.sector.last-lap.s3",
+    // Running sector clocks remain in same-frame context.sectors; their catalog
+    // projections have no standalone resolver executor.
+  ],
 } as const;
 
 export function liveSemanticIds(gameId: GameId): readonly string[] {

@@ -22,6 +22,8 @@ import { createLmuContextEncoder } from "@raceiq/shared/telemetry/lmu-context";
 import { createSemanticReplayEncoder, SEMANTIC_REPLAY_MEDIA_TYPE } from "../contracts/replay-wire";
 import type { SemanticLapTelemetry } from "../contracts/replay";
 import type { ProcessingMetadata } from "@raceiq/shared/racing/sessions/types";
+import { buildReplayEvidence, readNativeReplayEvents } from "./replay-evidence";
+import type { ReplayEvent, ReplayEvidence } from "../contracts/replay-evidence";
 
 export function semanticReplayIds(gameId: GameId): readonly string[] {
   return analyseSemanticIds(getGame(gameId));
@@ -57,7 +59,7 @@ export const replayRoutes = new Hono()
       }
       const lap = await getLapById(id, meta.processing);
       if (!lap) return c.json({ error: "Lap not found" }, 404);
-      if (lap.parseError) {
+      if (lap.parseError && lap.telemetry.length === 0) {
         return c.json({
           lapId: id, requestedSemanticIds: [], sectorTimes: meta.sectorTimes ?? null,
           sectorStarts: null, insights: [], detectorCoverage: INSIGHT_DETECTORS.map((detector) => ({ ...detector, status: "unavailable" as const, reason: "Lap telemetry could not be parsed" })), parseError: lap.parseError, envelopes: [],
@@ -105,10 +107,30 @@ export const replayRoutes = new Hono()
       const processed = processLap(lap.telemetry, meta.gameId);
       const analysis = runInsightScanWithCoverage(processed.packets, meta.gameId, resolveLapAnalysisContext(meta.gameId, meta.trackId, processed.packets));
       restoreFrameIndices(analysis.insights, processed.sourceIndices);
+      let evidence: ReplayEvidence | undefined;
+      if (meta.gameId === "f1-2025") {
+        let events: ReplayEvent[] = [];
+        let status: ReplayEvidence["nativeEvents"] = { state: "unavailable", reason: "Native event capture unavailable; no penalty or retirement cause inferred." };
+        const capturePath = artifact?.path ?? source.rawFile;
+        if (capturePath && replaySource.rawByteOffset !== null && replaySource.rawFrameCount !== null) {
+          try {
+            events = await readNativeReplayEvents({
+              rawFile: capturePath, source: source.source, gameId: source.gameId, carId: meta.carId, trackId: meta.trackId,
+              captureFormatVersion: source.captureFormatVersion, ...(artifact?.artifact ? { artifact: artifact.artifact } : {}),
+            }, replaySource.rawByteOffset, replaySource.rawFrameCount, lap.telemetry);
+            status = { state: "available", reason: "Native events inspected in this lap's owned capture window only; absence of an event is not proof that no incident occurred." };
+          } catch {
+            // Optional evidence must not make an otherwise playable capture disappear.
+            status = { state: "unavailable", reason: "Native event capture could not be inspected. Recorded replay remains available; event causes are not inferred." };
+          }
+        }
+        evidence = buildReplayEvidence(meta, lap.telemetry, events, status);
+      }
       const metadata = {
         lapId: id, requestedSemanticIds: requestedSemanticIds ?? replay!.requestedSemanticIds,
         sectorTimes: meta.sectorTimes ?? null, sectorStarts: nativeLayout?.starts ?? null,
         insights: analysis.insights, detectorCoverage: analysis.detectorCoverage, parseError: lap.parseError ?? null,
+        ...(evidence ? { evidence } : {}),
       };
       if (encoder) {
         return c.body(JSON.stringify(encoder.finish(metadata)), 200, { "Content-Type": SEMANTIC_REPLAY_MEDIA_TYPE });

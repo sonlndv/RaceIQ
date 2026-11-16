@@ -21,6 +21,7 @@ import type { GameId } from "@raceiq/shared/games/ids";
 import { timestampForFilename } from "@raceiq/backend-core/session-capture/filename";
 import { encodeFrameLength } from "@raceiq/capture-formats/session/framing";
 import { observeSandboxF1Wire, flushSandboxF1, stopSandboxF1 } from "@raceiq/backend-core/sandbox-f1/runtime";
+import { F1SessionLifecycle } from "./f1-session-lifecycle";
 
 
 const MIN_PACKET_LENGTH = 29; // Minimum: F1 header size
@@ -42,6 +43,10 @@ class UdpListener {
   private _lastRaceOn = false;
   private _lastWsPacketCount = 0;
   private _forzaRaceActive = false;
+  private readonly _f1Lifecycle = new F1SessionLifecycle(
+    () => lapDetector.finalizeCurrentSession(),
+    (error) => console.error("[Live Telemetry] Session finalization failed:", error),
+  );
   private _lastStatusAt = performance.now();
   private _statusTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -96,7 +101,6 @@ class UdpListener {
     this._lastStatusAt = performance.now();
     this._lastWsPacketCount = wsManager.packetCount;
     this._statusTimer = setInterval(() => {
-      flushSandboxF1();
       const statusAt = performance.now();
       const elapsedMs = Math.max(1, statusAt - this._lastStatusAt);
       this._lastStatusAt = statusAt;
@@ -108,6 +112,7 @@ class UdpListener {
       // this, an abrupt termination leaves lap offsets pointing past EOF and
       // telemetry disappears from the analyse view.
       if (!this._dumpOnly) flushSessionRecorderBuffer();
+      flushSandboxF1();
 
       // Mark as not receiving if no packets in last second
       if (this._packetsPerSec === 0 && this._receiving) {
@@ -135,9 +140,9 @@ class UdpListener {
         } else {
           console.log("[Game] state change to null");
           this._forzaRaceActive = false;
-          // Finalize session immediately when game disconnects
+          // Finalize disconnects without shortening an F1 terminal evidence drain.
           if (!this._dumpOnly) {
-            void lapDetector.finalizeCurrentSession().catch((error) => {
+            void this._f1Lifecycle.disconnect().catch((error) => {
               console.error("[Live Telemetry] Session finalization failed:", error);
             });
           }
@@ -179,7 +184,11 @@ class UdpListener {
     // Use dgram for socket buffer tuning — Bun.udpSocket doesn't expose setsockopt
     const dgram = require("node:dgram");
     const sock = dgram.createSocket("udp4");
-    sock.on("message", (sourceFrame: Buffer) => this.handlePacket(sourceFrame));
+    sock.on("message", (sourceFrame: Buffer) => {
+      void this.handlePacket(sourceFrame).catch((error) => {
+        console.error("[Live Telemetry] Packet processing failed:", error);
+      });
+    });
     await new Promise<void>((resolve, reject) => {
       sock.bind(port, hostname, () => {
         this._port = sock.address().port;
@@ -216,21 +225,22 @@ class UdpListener {
     // the exact wire format (including any packets parsePacket would skip).
     this._recorder?.writeRawCaptureRecord(Buffer.concat([encodeFrameLength(sourceFrame.length, frameTimeMs), sourceFrame]));
 
-    const runningGame = getRunningGame();
-    if (!this._dumpOnly && runningGame?.id === "fm-2023" && isForzaRaceOffPacket(sourceFrame)) {
-      // FM emits the same zeroed packet during pit service and after the race.
-      // Keep live ownership; a resumed race replaces this provisional snapshot.
-      if (this._forzaRaceActive) await lapDetector.snapshotIncompleteLap();
-      return;
-    }
-
-    // Returns null when another game is paused/in menus.
-    const packet = parsePacket(sourceFrame, frameTimeMs);
-    if (!packet) return;
-
-    this._receiving = true;
-    if (packet.gameId === "fm-2023") this._forzaRaceActive = true;
-    await processPacket(packet, sourceFrame, frameTimeMs);
+    const record = async () => {
+      const runningGame = getRunningGame();
+      if (!this._dumpOnly && runningGame?.id === "fm-2023" && isForzaRaceOffPacket(sourceFrame)) {
+        // FM emits the same zeroed packet during pit service and after the race.
+        if (this._forzaRaceActive) await lapDetector.snapshotIncompleteLap();
+        return;
+      }
+      const packet = parsePacket(sourceFrame, frameTimeMs);
+      if (packet) {
+        this._receiving = true;
+        if (packet.gameId === "fm-2023") this._forzaRaceActive = true;
+        await processPacket(packet, sourceFrame, frameTimeMs);
+      }
+    };
+    if (this._dumpOnly) await record();
+    else await this._f1Lifecycle.handle(sourceFrame, record);
   }
 
   async stop(): Promise<void> {
@@ -244,6 +254,7 @@ class UdpListener {
       this._socket = null;
       console.log("[UDP] Listener stopped");
     }
+    await this._f1Lifecycle.flush();
     if (this._recorder) {
       // Await the flush on a clean shutdown. The format is append-only, so
       // even a hard kill only risks the last packet being truncated — but

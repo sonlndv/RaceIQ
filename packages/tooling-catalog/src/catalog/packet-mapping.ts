@@ -911,6 +911,13 @@ function ensureCategoryGroups(groups: Map<string, CatalogGroup>): void {
     canonicalUnit: "s",
     children: [],
   });
+  groups.set("timing.sector.competitor-current", {
+    id: "timing.sector.competitor-current",
+    label: "Competitor current sectors",
+    description: "Native current sector index and completed splits on each identified competitor lap.",
+    parentId: "race.competitor.timing",
+    children: [],
+  });
   groups.set("timing.sector.competitor-last", {
     id: "timing.sector.competitor-last",
     label: "Competitor last sectors",

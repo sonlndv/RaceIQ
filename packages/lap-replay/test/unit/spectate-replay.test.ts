@@ -804,7 +804,7 @@ describe("Spectate native sampling", () => {
     controller.dispose();
   });
 
-  test("semantic sequences are not original packet offsets; reset never fabricates a second lap", () => {
+  test("semantic sequences are not packet offsets; clock resets preserve a separate playable run", () => {
     const times = [0, 0.05, 0.1, 0.15, 0.02];
     const replay: SemanticLapTelemetry = {
       lapId: 1,
@@ -827,8 +827,11 @@ describe("Spectate native sampling", () => {
     };
     const comparison = { traces: { elapsedTimeA: [0, 0.05, 0.1, 0.15], distance: [0, 10, 20, 30], sourceIndicesA: [200, 400, 600, 800] } } as unknown as ComparisonData;
     const a = prepareSpectateLap(replay, comparison, "a");
-    expect(a.samples.map((sample) => sample.distance)).toEqual([0, 10, 20, 30]);
-    expect(a.duration).toBeCloseTo(0.15);
+    expect(a.samples.map((sample) => sample.distance)).toEqual([0, 12, 24, 36, 48]);
+    expect(a.duration).toBeCloseTo(0.2);
+    expect(a.samples.at(-1)?.nativeTime).toBe(0.02);
+    expect(a.samples.at(-1)?.run).toBe(1);
+    expect(a.alignmentUnavailable).toContain("clock reset");
     const controller = createSpectateController(a, a);
     expect(controller.sample(0.025).a?.values["motion.speed"]).toBeNull();
     expect(controller.sample(0.05).a?.pose?.x).toBe(10);

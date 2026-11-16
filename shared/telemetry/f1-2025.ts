@@ -4,6 +4,16 @@ export interface F1GridEntry {
   driverId: number;
   teamId: number;
   name: string;
+  /** Native car-slot/lap/rewind identity; optional for older stored packets. */
+  carIndex?: number;
+  timingEpoch?: number;
+  currentLapNum?: number;
+  currentSector?: number;
+  currentS1?: number;
+  currentS2?: number;
+  currentLapValid?: boolean;
+  resultStatus?: number;
+  lastLapNumber?: number;
   currentLapTime: number;
   lastLapTime: number;
   bestLapTime: number;
@@ -14,7 +24,7 @@ export interface F1GridEntry {
   tyreCompound: string;
   tyreAge: number;
   penalties: number;
-  // Sector times from session history (seconds, 0 if unavailable)
+  // Coherent completed sectors in seconds; 0 means unavailable.
   bestS1: number;
   bestS2: number;
   bestS3: number;
@@ -43,15 +53,14 @@ export interface F1ExtendedData {
   currentSector: number; // 0=S1, 1=S2, 2=S3
   sector1Time: number; // seconds (0 if not completed this lap)
   sector2Time: number; // seconds (0 if not completed this lap)
-  lastS1: number; // definitive sector times from SessionHistory (0 if not yet received)
+  lastS1: number; // Matching completed prior-lap sectors (0 until coherent evidence arrives)
   lastS2: number;
   lastS3: number;
   /**
-   * Per-lap completed sector times from the F1 SessionHistory packet, keyed by
-   * 1-indexed lap number. Each entry is `{ s1, s2, s3, lapTime }` in seconds.
-   * Prefer this over `lastS1/lastS2/lastS3` for specific-lap queries — the
-   * "last" fields track whatever lap is currently in progress in the game, so
-   * they reset to 0 the moment a new lap starts.
+   * Current-epoch lap splits keyed by 1-indexed lap number, in seconds.
+   * Native S1/S2 partials remain pending until a matching native last-lap
+   * total or completed SessionHistory supplies S3. A positive coherent
+   * lapTime is required before treating an entry as a completed lap.
    */
   lapSectors?: Record<number, { s1: number; s2: number; s3: number; lapTime: number }>;
   // Damage (0-100, 0=no damage)
@@ -130,7 +139,7 @@ export interface F1ExtendedData {
   driverStatus?: number;
   resultStatus?: number;
   resultReason?: number;
-  resultSource?: "lap-data" | "final-classification";
+  resultSource?: "lap-data" | "final-classification" | "event";
   pitLaneTimerActive?: number;
   pitLaneTimeInLaneInMS?: number;
   speedTrapFastestSpeed?: number;

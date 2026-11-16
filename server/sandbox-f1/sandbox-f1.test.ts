@@ -139,6 +139,52 @@ describe("native Austria race sandbox capture", () => {
     expect(state.drivers[0]!.laps[1]).toMatchObject({ completed: true, lapTimeSec: 90 });
   });
 
+  test("UID0 auxiliary records never switch context; trailing RTMT enriches the scoped SEND driver", () => {
+    const h = harness(); h.send(session()); h.send(participants()); h.send(laps(1, 42000, 3, { count: 22 }));
+    const buttons = wire(3, Buffer.from("BUTN"), 900, 0n);
+    const unscopedHistory = history(0, [{ time: 89000 }], 901); unscopedHistory.writeBigUInt64LE(0n, 7);
+    expect(h.send(buttons)).toBe(false);
+    expect(h.send(unscopedHistory)).toBe(false);
+    expect(h.send(session(902, 17, 15, 0n))).toBe(false);
+    expect(h.send(event("SEND", 4))).toBe(true);
+    const retirement = wire(3, Buffer.concat([Buffer.from("RTMT"), Buffer.from([0])]), 0, 0n);
+    const original = Buffer.from(retirement);
+    expect(h.send(retirement)).toBe(true);
+    h.send(laps(2, 1000, 5, { count: 22 }));
+    const state = h.state();
+    expect(h.store.list()).toHaveLength(1);
+    expect(state.uid).toBe("42");
+    expect(state.session.closed).toBe(true);
+    expect(state.drivers).toHaveLength(22);
+    expect(state.drivers[0]!.laps).toHaveLength(1);
+    expect(state.drivers[0]!.laps[0]).toMatchObject({ completed: false, lapTimeSec: 42, status: "retired" });
+    expect(state.drivers[1]!.laps[0]!.status).toBe("incomplete");
+    expect(retirement.equals(original)).toBe(true);
+  });
+
+  test("UID0 cannot supply a race preamble or close an unrelated session", () => {
+    const h = harness();
+    const retirement = wire(3, Buffer.concat([Buffer.from("RTMT"), Buffer.from([0])]), 10, 0n);
+    expect(h.send(retirement)).toBe(false);
+    h.send(participants(22));
+    const unknown = history(0, [{ time: 88000 }]); unknown.writeBigUInt64LE(0n, 7);
+    h.send(unknown);
+    h.send(session());
+    h.send(laps(1, 40000, 3));
+    const mismatch = Buffer.from(retirement); mismatch[27] = 19;
+    expect(h.send(mismatch)).toBe(false);
+    expect(h.send(wire(3, Buffer.from("SEND"), 11, 0n))).toBe(false);
+    const state = h.state();
+    expect(state.session.closed).toBe(false);
+    expect(state.drivers).toHaveLength(22);
+    expect(state.drivers[0]!.laps).toHaveLength(0);
+    expect(state.drivers[0]!.currentLap!.lapTimeSec).toBe(40);
+    h.send(session(12, 17, 15, 43n));
+    expect(h.send(mismatch)).toBe(false);
+    h.observer.flush();
+    expect(h.store.list()).toHaveLength(2);
+  });
+
   test("SSTA and process restart distinguish same UID generations and retain checkpointed partial", () => {
     const directory = mkdtempSync(join(tmpdir(), "raceiq-sandbox-f1-")); directories.push(directory);
     const h = harness(join(directory, "history.sqlite")); h.send(session()); h.send(participants(1)); h.send(laps(1, 44000, 3, { invalid: true })); h.observer.flush();
@@ -248,5 +294,18 @@ describe("native Austria race sandbox capture", () => {
     interrupted.send(event("FLBK", 5));
     expect(interrupted.state().drivers[0]!.laps).toHaveLength(1);
     expect(interrupted.state().drivers[0]!.laps[0]).toMatchObject({ completed: false, lapTimeSec: 45, valid: false, status: "flashback" });
+  });
+
+  test("session end survives other event codes on the same overall frame", () => {
+    const h = harness(); h.send(session()); h.send(participants(1));
+    h.send(laps(10, 28144, 3, { s1: 18000 }));
+    h.send(event("PENA", 4));
+    h.send(event("SEND", 4));
+    h.send(event("RTMT", 4));
+    const saved = h.state();
+    expect(saved.session.closed).toBe(true);
+    expect(saved.drivers[0]!.currentLap).toBeNull();
+    expect(saved.drivers[0]!.laps).toHaveLength(1);
+    expect(saved.drivers[0]!.laps[0]).toMatchObject({ lapNumber: 10, lapTimeSec: 28.144, completed: false, status: "incomplete" });
   });
 });

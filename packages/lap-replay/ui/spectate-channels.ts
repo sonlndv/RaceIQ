@@ -97,7 +97,7 @@ export function buildSpectateChannels(pair: ReplaySession): SpectateChannel[] {
       wearRate: { a: buildWearHistory(pair.a.samples, semanticId), b: pair.b ? buildWearHistory(pair.b.samples, semanticId) : [] },
     });
   }
-  if (pair.b && pair.comparison.traces?.distance.length && pair.comparison.timeDelta?.some(numeric)) {
+  if (pair.b && !pair.a.alignmentUnavailable && !pair.b.alignmentUnavailable && pair.comparison.traces?.distance.length && pair.comparison.timeDelta?.some(numeric)) {
     channels.push({
       id: "comparison.time-delta",
       label: "Time delta",

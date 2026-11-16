@@ -14,6 +14,8 @@ export interface F1SessionData {
 export interface F1LapCarData {
   currentLapTime: number; lastLapTime: number; bestLapTime: number;
   position: number; pitStatus: number; numPitStops: number; totalDistance: number;
+  currentLapNum?: number; sector?: number; sector1Time?: number; sector2Time?: number;
+  currentLapInvalid?: number; resultStatus?: number;
 }
 export interface F1LapData {
   currentLapTime: number; lastLapTime: number; bestLapTime: number;
@@ -80,19 +82,21 @@ export interface F1LapSectorData { s1: number; s2: number; s3: number; lapTime: 
 export interface F1DriverHistoryData { bestS1: number; bestS2: number; bestS3: number; lastS1: number; lastS2: number; lastS3: number; bestLapTime: number; }
 export interface F1SessionHistoryData {
   carIndex: number; history: F1DriverHistoryData; lapSectors: Array<{ lapNumber: number; sectors: F1LapSectorData }>;
+  bestLapNumber: number; bestSectorLaps: [number, number, number];
 }
 
 export interface F1EventData {
   code: string;
   numLights?: number;
+  carIndex?: number;
 }
 
 export function decodeF1Event(data: Buffer): F1EventData | null {
   if (data.length < 4) return null;
   const code = data.toString("ascii", 0, 4);
-  return code === "STLG" && data.length >= 5
-    ? { code, numLights: data.readUInt8(4) }
-    : { code };
+  if (code === "STLG" && data.length >= 5) return { code, numLights: data.readUInt8(4) };
+  if (code === "RTMT") return data.length >= 5 ? { code, carIndex: data.readUInt8(4) } : null;
+  return { code };
 }
 export function decodeF1Motion(data: Buffer, playerCarIndex: number): F1MotionData | null {
   const size = 60; const o = playerCarIndex * size;
@@ -107,7 +111,18 @@ export function decodeF1Session(data: Buffer): F1SessionData | null {
 }
 export function decodeF1LapData(data: Buffer, playerCarIndex: number): F1LapData | null {
   const size = 57; const allCars: F1LapCarData[] = [];
-  for (let i = 0; i < 22 && data.length >= (i + 1) * size; i++) { const o = i * size; allCars.push({ lastLapTime: data.readUInt32LE(o) / 1000, currentLapTime: data.readUInt32LE(o + 4) / 1000, bestLapTime: 0, position: data.readUInt8(o + 32), pitStatus: data.readUInt8(o + 34), numPitStops: data.readUInt8(o + 35), totalDistance: data.readFloatLE(o + 24) }); }
+  for (let i = 0; i < 22 && data.length >= (i + 1) * size; i++) {
+    const o = i * size;
+    allCars.push({
+      lastLapTime: data.readUInt32LE(o) / 1000, currentLapTime: data.readUInt32LE(o + 4) / 1000,
+      bestLapTime: 0, position: data.readUInt8(o + 32), pitStatus: data.readUInt8(o + 34),
+      numPitStops: data.readUInt8(o + 35), totalDistance: data.readFloatLE(o + 24),
+      currentLapNum: data.readUInt8(o + 33), sector: data.readUInt8(o + 36),
+      sector1Time: (data.readUInt8(o + 10) * 60000 + data.readUInt16LE(o + 8)) / 1000,
+      sector2Time: (data.readUInt8(o + 13) * 60000 + data.readUInt16LE(o + 11)) / 1000,
+      currentLapInvalid: data.readUInt8(o + 37), resultStatus: data.readUInt8(o + 45),
+    });
+  }
   const o = playerCarIndex * size; if (data.length < o + size) return null;
   const s1 = data.readUInt8(o + 10) * 60000 + data.readUInt16LE(o + 8); const s2 = data.readUInt8(o + 13) * 60000 + data.readUInt16LE(o + 11);
   return { lastLapTime: data.readUInt32LE(o) / 1000, currentLapTime: data.readUInt32LE(o + 4) / 1000, bestLapTime: 0, currentLapNum: data.readUInt8(o + 33), position: data.readUInt8(o + 32), totalDistance: data.readFloatLE(o + 24), lapDistance: data.readFloatLE(o + 20), sector: data.readUInt8(o + 36), sector1Time: s1 / 1000, sector2Time: s2 / 1000, currentLapInvalid: data.readUInt8(o + 37), penalties: data.readUInt8(o + 38), totalWarnings: data.readUInt8(o + 39), cornerCuttingWarnings: data.readUInt8(o + 40), driverStatus: data.readUInt8(o + 44), resultStatus: data.readUInt8(o + 45), pitLaneTimerActive: data.readUInt8(o + 46), pitLaneTimeInLaneInMS: data.readUInt16LE(o + 47), speedTrapFastestSpeed: data.readFloatLE(o + 52), gridPosition: data.readUInt8(o + 43), allCars };
@@ -161,14 +176,29 @@ export function decodeF1SessionHistory(data: Buffer): F1SessionHistoryData | nul
   const carIndex = data.readUInt8(0), count = data.readUInt8(1), bestS1Lap = data.readUInt8(4), bestS2Lap = data.readUInt8(5), bestS3Lap = data.readUInt8(6);
   const size = 14, base = 7; const sector = (o: number, ms: number, min: number) => (data.readUInt8(o + min) * 60000 + data.readUInt16LE(o + ms)) / 1000;
   let bestS1 = 0, bestS2 = 0, bestS3 = 0, bestLapTime = 0, lastS1 = 0, lastS2 = 0, lastS3 = 0;
+  let bestLapNumber = 0;
   if (bestS1Lap > 0 && bestS1Lap <= count) { const o = base + (bestS1Lap - 1) * size; if (data.length >= o + size) bestS1 = sector(o, 4, 6); }
   if (bestS2Lap > 0 && bestS2Lap <= count) { const o = base + (bestS2Lap - 1) * size; if (data.length >= o + size) bestS2 = sector(o, 7, 9); }
   if (bestS3Lap > 0 && bestS3Lap <= count) { const o = base + (bestS3Lap - 1) * size; if (data.length >= o + size) bestS3 = sector(o, 10, 12); }
   const lapSectors: F1SessionHistoryData["lapSectors"] = [];
-  if (count > 0) {
-    const last = base + (count - 1) * size;
-    if (data.length >= last + size) { const ms = data.readUInt32LE(last); lastS1 = sector(last, 4, 6); lastS2 = sector(last, 7, 9); lastS3 = sector(last, 10, 12); if (ms > 0) bestLapTime = ms / 1000; }
-    for (let i = 0; i < count; i++) { const o = base + i * size; if (data.length < o + size) break; const sectors = { lapTime: data.readUInt32LE(o) / 1000, s1: sector(o, 4, 6), s2: sector(o, 7, 9), s3: sector(o, 10, 12) }; lapSectors.push({ lapNumber: i + 1, sectors }); if (sectors.lapTime > 0 && (bestLapTime === 0 || sectors.lapTime < bestLapTime)) bestLapTime = sectors.lapTime; }
+  for (let i = 0; i < Math.min(count, 100); i++) {
+    const o = base + i * size;
+    if (data.length < o + size) break;
+    const sectors = { lapTime: data.readUInt32LE(o) / 1000, s1: sector(o, 4, 6), s2: sector(o, 7, 9), s3: sector(o, 10, 12) };
+    lapSectors.push({ lapNumber: i + 1, sectors });
+    // numLaps includes the in-progress trailing entry. Only a completed,
+    // coherent lap may move the last-lap pointer; keep partials in the map.
+    if (sectors.lapTime > 0 && sectors.s1 > 0 && sectors.s2 > 0 && sectors.s3 > 0 &&
+        Math.abs(sectors.s1 + sectors.s2 + sectors.s3 - sectors.lapTime) <= 0.002000001) {
+      lastS1 = sectors.s1; lastS2 = sectors.s2; lastS3 = sectors.s3;
+    }
+    // Session-best identity depends on a known native lap total, not on the
+    // availability of three sector splits for that driver.
+    if (sectors.lapTime > 0 && ((data.readUInt8(o + 13) & 1) !== 0 || i + 1 === data.readUInt8(3)) &&
+        (bestLapTime === 0 || sectors.lapTime < bestLapTime)) {
+      bestLapTime = sectors.lapTime; bestLapNumber = i + 1;
+    }
   }
-  return { carIndex, history: { bestS1, bestS2, bestS3, lastS1, lastS2, lastS3, bestLapTime }, lapSectors };
+  return { carIndex, history: { bestS1, bestS2, bestS3, lastS1, lastS2, lastS3, bestLapTime }, lapSectors,
+    bestLapNumber, bestSectorLaps: [bestS1Lap, bestS2Lap, bestS3Lap] };
 }

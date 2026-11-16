@@ -2,6 +2,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import { Pause, Play } from "lucide-react";
 import { useMessages } from "./host"
 import type { SpectateController, ReplaySession } from "../contracts/spectate";
+import { ReplayEvidencePanel, REPLAY_EVENT_LABELS } from "./ReplayEvidencePanel";
 function stamp(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   return `${String(minutes).padStart(2, "0")}:${(seconds - minutes * 60).toFixed(3).padStart(6, "0")}`;
@@ -11,6 +12,7 @@ const duration = Number.isFinite(snapshot.duration) ? Math.max(0, snapshot.durat
 const time = Math.max(0, Math.min(duration, snapshot.time));
 // The replay clock always follows A's elapsed time, including position-lock mode.
 const sectors = useMemo(() => {
+  if (pair.a.alignmentUnavailable || pair.b?.alignmentUnavailable) return [];
   const times = pair.comparison.lapA.sectorTimes;
   if (!times?.length || times.some((value) => !Number.isFinite(value) || value <= 0)) return [];
   let elapsed = 0;
@@ -37,6 +39,7 @@ return (
     data-a-time={snapshot.a?.time ?? ""}
     data-b-time={snapshot.b?.time ?? ""}
   >
+    <ReplayEvidencePanel pair={pair} controller={controller} />
     <div className="relative flex h-8 items-center">
       {sectors.map((sector) => sector.start < duration && duration > 0 && (
         <span
@@ -71,6 +74,16 @@ return (
           <span className="h-2 w-px bg-current" aria-hidden="true" />
         </button>
       ))}
+      {[pair.a, ...(pair.b ? [pair.b] : [])].flatMap((lap, side) => (lap.events ?? []).map((event, index) => event.time !== null && duration > 0 && (
+        <button key={`event-${side}-${index}`} type="button" data-replay-timeline-event={event.kind}
+          className="absolute top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-app-border bg-app-bg px-1 text-app-compact text-app-text hover:text-app-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-app-accent"
+          style={{ left: `calc(8px + (100% - 16px) * ${Math.min(event.time, duration) / duration})` }}
+          title={`${pair.b ? side === 0 ? "A · " : "B · " : ""}${REPLAY_EVENT_LABELS[event.kind]} · ${event.reason} Source: ${event.source}`}
+          aria-label={`${REPLAY_EVENT_LABELS[event.kind]} at capture ${event.time.toFixed(3)} seconds. ${event.reason}. Source: ${event.source}`}
+          onClick={() => { if (event.frameIndex !== null) controller.seekFrame(side === 0 ? "a" : "b", event.frameIndex); }}>
+          {event.kind === "flashback" ? "F" : event.kind === "invalidation" ? "I" : event.kind === "penalty" ? "P" : event.kind === "retirement" ? "D" : "G"}
+        </button>
+      )))}
     <input
       aria-label={m.spectate_seek()}
       className="h-11 w-full cursor-pointer accent-app-accent sm:h-1.5"
@@ -95,6 +108,9 @@ return (
         {stamp(time)}
       </output>
       <span className="text-app-text-secondary">/ {stamp(duration)}</span>
+      {pair.a.alignmentUnavailable && <span className="text-app-text-secondary">Capture time</span>}
+      {snapshot.a?.run !== undefined && <span className="text-app-text-secondary">Run {snapshot.a.run + 1}</span>}
+      {typeof snapshot.a?.values["timing.current-lap"] === "number" && <span className="text-app-text-secondary">Native lap {stamp(Number(snapshot.a.values["timing.current-lap"]))}</span>}
       <label className="ml-auto flex items-center gap-2 text-app-text-secondary">
         {m.spectate_playback_speed()}
         <select

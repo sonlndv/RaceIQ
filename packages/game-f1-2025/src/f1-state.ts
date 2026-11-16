@@ -66,6 +66,8 @@ export interface F1ParserCheckpointV1 {
   seenStartLightsAt?: number;
   raceStartAt?: number;
   lastHeaderSessionTime?: number;
+  timingEpoch?: number;
+  retiredCarIndex?: number;
 }
 
 function hasFiniteFields(value: unknown, fields: string[], booleanFields: string[] = []): boolean {
@@ -104,6 +106,12 @@ function validF1StateObject(key: string, value: unknown): boolean {
 function validDriverHistory(value: unknown): boolean {
   return hasFiniteFields(value, ["bestS1", "bestS2", "bestS3", "lastS1", "lastS2", "lastS3", "bestLapTime"]);
 }
+
+function completedSectors(value: F1LapSectorData | undefined, lapTime: number): F1LapSectorData | undefined {
+  return value && lapTime > 0 && value.s1 > 0 && value.s2 > 0 && value.s3 > 0 &&
+    Math.abs(value.lapTime - lapTime) <= 0.002000001 &&
+    Math.abs(value.s1 + value.s2 + value.s3 - lapTime) <= 0.002000001 ? value : undefined;
+}
 export class F1StateAccumulator {
   private sessionUID: bigint = 0n;
 
@@ -125,6 +133,8 @@ export class F1StateAccumulator {
   private seenStartLightsAt: number | undefined;
   private raceStartAt: number | undefined;
   private lastHeaderSessionTime: number | undefined;
+  private timingEpoch = 0;
+  private retiredCarIndex: number | undefined;
 
   reset(): void {
     this.sessionUID = 0n;
@@ -139,6 +149,9 @@ export class F1StateAccumulator {
     this.session = null;
     this.participants = [];
     this.driverHistory = new Map();
+    this.driverLapSectors.clear();
+    this.timingEpoch = 0;
+    this.retiredCarIndex = undefined;
     this.playerCarIndex = 0;
     this.carStatusUpdatedAt = undefined;
     this.sessionUpdatedAt = undefined;
@@ -164,6 +177,8 @@ export class F1StateAccumulator {
       seenStartLightsAt: this.seenStartLightsAt,
       raceStartAt: this.raceStartAt,
       lastHeaderSessionTime: this.lastHeaderSessionTime,
+      timingEpoch: this.timingEpoch,
+      retiredCarIndex: this.retiredCarIndex,
     };
     // JSON numbers support -0, but stringify normally discards its sign.
     const json = JSON as typeof JSON & { rawJSON(text: string): unknown };
@@ -190,6 +205,9 @@ export class F1StateAccumulator {
             Array.isArray(entry[1]) && entry[1].every((sector) => Array.isArray(sector) && sector.length === 2 &&
               Number.isInteger(sector[0]) && hasFiniteFields(sector[1], ["s1", "s2", "s3", "lapTime"]))) ||
         !Number.isInteger(checkpoint.playerCarIndex) ||
+        (checkpoint.timingEpoch !== undefined && (!Number.isSafeInteger(checkpoint.timingEpoch) || checkpoint.timingEpoch < 0)) ||
+        (checkpoint.retiredCarIndex !== undefined && (!Number.isInteger(checkpoint.retiredCarIndex) ||
+          checkpoint.retiredCarIndex < 0 || checkpoint.retiredCarIndex >= 22)) ||
         !["carStatusUpdatedAt", "sessionUpdatedAt", "seenStartLightsAt", "raceStartAt", "lastHeaderSessionTime"]
           .every((key) => checkpoint[key as keyof F1ParserCheckpointV1] === undefined ||
             (typeof checkpoint[key as keyof F1ParserCheckpointV1] === "number" &&
@@ -221,6 +239,8 @@ export class F1StateAccumulator {
     this.seenStartLightsAt = checkpoint.seenStartLightsAt;
     this.raceStartAt = checkpoint.raceStartAt;
     this.lastHeaderSessionTime = checkpoint.lastHeaderSessionTime;
+    this.timingEpoch = checkpoint.timingEpoch ?? 0;
+    this.retiredCarIndex = checkpoint.retiredCarIndex;
   }
 
   /**
@@ -231,7 +251,7 @@ export class F1StateAccumulator {
   feed(header: F1Header, buf: Buffer): TelemetryPacket | null {
     if (!this.applyState(header, buf)) return null;
     if (this.motion && this.carTelemetry && this.lapData && this.session) {
-      return this.buildPacket(header);
+      return this.buildPacket(header.sessionUID === 0n ? this.lastHeaderSessionTime! : header.sessionTime);
     }
     return null;
   }
@@ -241,18 +261,28 @@ export class F1StateAccumulator {
   }
 
   private applyState(header: F1Header, buf: Buffer): boolean {
+    const data = buf.subarray(F1_HEADER_SIZE);
+    if (header.sessionUID === 0n) {
+      // UID0 packets are unscoped auxiliary/end evidence, not a new session.
+      // Only a retirement naming the already scoped player can change race state.
+      if (this.sessionUID === 0n || this.lastHeaderSessionTime === undefined ||
+          header.playerCarIndex !== this.playerCarIndex || header.packetId !== F1_PACKET_IDS.EVENT) return false;
+      const event = decodeF1Event(data);
+      if (event?.code !== "RTMT" || event.carIndex !== this.playerCarIndex || event.carIndex >= 22) return false;
+      this.applyEvent(event, this.lastHeaderSessionTime);
+      return true;
+    }
+    // Only a scoped header may advance the native clock or select the player.
     if (header.sessionUID !== this.sessionUID) {
       this.reset();
       this.sessionUID = header.sessionUID;
     }
     this.playerCarIndex = header.playerCarIndex;
-    if (this.lastHeaderSessionTime !== undefined && header.sessionTime < this.lastHeaderSessionTime) {
-      this.seenStartLightsAt = undefined;
-      this.raceStartAt = undefined;
+    if (this.lastHeaderSessionTime !== undefined && header.sessionTime < this.lastHeaderSessionTime - 0.5) {
+      this.rewindTiming();
     }
     this.lastHeaderSessionTime = header.sessionTime;
 
-    const data = buf.subarray(F1_HEADER_SIZE);
     switch (header.packetId) {
       case F1_PACKET_IDS.MOTION:
         this.motion = decodeF1Motion(data, this.playerCarIndex) ?? this.motion;
@@ -265,9 +295,19 @@ export class F1StateAccumulator {
         }
         break;
       }
-      case F1_PACKET_IDS.LAP_DATA:
-        this.lapData = decodeF1LapData(data, this.playerCarIndex) ?? this.lapData;
+      case F1_PACKET_IDS.LAP_DATA: {
+        const decoded = decodeF1LapData(data, this.playerCarIndex);
+        if (decoded) {
+          const prior = this.lapData;
+          if (prior && decoded.resultStatus === 2 && prior.resultStatus === 2 && decoded.currentLapNum > 0 && prior.currentLapNum > 0 &&
+              (decoded.currentLapNum < prior.currentLapNum ||
+               decoded.currentLapNum === prior.currentLapNum && decoded.currentLapTime < prior.currentLapTime - 0.5))
+            this.rewindTiming();
+          this.lapData = decoded;
+          this.applyLapSectors(decoded);
+        }
         break;
+      }
       case F1_PACKET_IDS.PARTICIPANTS:
         this.participants = decodeF1Participants(data);
         break;
@@ -312,7 +352,15 @@ export class F1StateAccumulator {
   }
 
   private applyEvent(event: F1EventData, sessionTime: number): void {
+    if (event.code === "RTMT" && event.carIndex === this.playerCarIndex && event.carIndex < 22)
+      this.retiredCarIndex = event.carIndex;
+    if (event.code === "FLBK") {
+      this.rewindTiming();
+      this.lastHeaderSessionTime = undefined;
+    }
     if (event.code === "SSTA") {
+      this.retiredCarIndex = undefined;
+      this.finalClassification = null;
       this.seenStartLightsAt = undefined;
       this.raceStartAt = undefined;
     } else if (event.code === "STLG") {
@@ -323,35 +371,81 @@ export class F1StateAccumulator {
     }
   }
 
+  private rewindTiming(): void {
+    this.timingEpoch++;
+    this.driverHistory.clear();
+    this.driverLapSectors.clear();
+    this.lapData = null;
+    this.finalClassification = null;
+    this.retiredCarIndex = undefined;
+    this.seenStartLightsAt = undefined;
+    this.raceStartAt = undefined;
+  }
+
+  private applyLapSectors(decoded: F1LapData): void {
+    for (let i = 0; i < decoded.allCars.length; i++) {
+      const car = decoded.allCars[i];
+      const lap = car.currentLapNum ?? 0;
+      if (lap < 1) continue;
+      let laps = this.driverLapSectors.get(i);
+      if (!laps) this.driverLapSectors.set(i, laps = new Map());
+      // LapData splits are durations, not cumulative clocks. Ignore retained
+      // previous-lap bytes until the native sector says that split completed.
+      const prior = laps.get(lap);
+      const s1 = (car.sector ?? -1) >= 1 ? car.sector1Time ?? 0 : 0;
+      const s2 = (car.sector ?? -1) >= 2 ? car.sector2Time ?? 0 : 0;
+      if (!completedSectors(prior, prior?.lapTime ?? 0))
+        laps.set(lap, { s1: s1 > 0 ? s1 : prior?.s1 ?? 0, s2: s2 > 0 ? s2 : prior?.s2 ?? 0, s3: 0, lapTime: 0 });
+      const previous = laps.get(lap - 1);
+      // Pending partials survive packet gaps and delayed native lap totals.
+      if (previous && previous.lapTime === 0 &&
+          previous.s1 > 0 && previous.s2 > 0 && car.lastLapTime > previous.s1 + previous.s2) {
+        laps.set(lap - 1, { ...previous, s3: car.lastLapTime - previous.s1 - previous.s2, lapTime: car.lastLapTime });
+      }
+    }
+  }
+
+  private lastSectors(carIndex: number): F1LapSectorData | undefined {
+    const car = this.lapData?.allCars[carIndex];
+    return car ? completedSectors(this.driverLapSectors.get(carIndex)?.get((car.currentLapNum ?? 0) - 1), car.lastLapTime) : undefined;
+  }
+
   private applySessionHistory(decoded: F1SessionHistoryData): void {
+    if (this.timingEpoch > 0 && !this.lapData) return;
     let lapSectorMap = this.driverLapSectors.get(decoded.carIndex);
     if (!lapSectorMap) {
       lapSectorMap = new Map();
       this.driverLapSectors.set(decoded.carIndex, lapSectorMap);
     }
+    const currentLap = this.lapData?.allCars[decoded.carIndex]?.currentLapNum;
 
     for (const { lapNumber, sectors } of decoded.lapSectors) {
+      // A history packet can trail the LapData transition or the flashback.
+      // Never import future/abandoned completed laps into the current epoch.
+      if (currentLap !== undefined && (lapNumber > currentLap || lapNumber === currentLap && sectors.lapTime > 0)) continue;
       const existing = lapSectorMap.get(lapNumber);
-      const completeness =
-        (sectors.s1 > 0 ? 1 : 0) +
-        (sectors.s2 > 0 ? 1 : 0) +
-        (sectors.s3 > 0 ? 1 : 0) +
-        (sectors.lapTime > 0 ? 1 : 0);
-      const existingCompleteness = existing
-        ? (existing.s1 > 0 ? 1 : 0) +
-          (existing.s2 > 0 ? 1 : 0) +
-          (existing.s3 > 0 ? 1 : 0) +
-          (existing.lapTime > 0 ? 1 : 0)
-        : -1;
-      if (completeness > existingCompleteness) {
+      if (sectors.lapTime === 0 && (!existing || existing.lapTime === 0)) {
+        lapSectorMap.set(lapNumber, {
+          s1: sectors.s1 > 0 ? sectors.s1 : existing?.s1 ?? 0,
+          s2: sectors.s2 > 0 ? sectors.s2 : existing?.s2 ?? 0,
+          s3: sectors.s3 > 0 ? sectors.s3 : existing?.s3 ?? 0,
+          lapTime: 0,
+        });
+      } else if (completedSectors(sectors, sectors.lapTime)) {
         lapSectorMap.set(lapNumber, sectors);
       }
     }
 
-    this.driverHistory.set(decoded.carIndex, decoded.history);
+    const inEpoch = (lap: number) => currentLap === undefined || lap > 0 && lap < currentLap;
+    this.driverHistory.set(decoded.carIndex, { ...decoded.history,
+      bestLapTime: inEpoch(decoded.bestLapNumber) ? decoded.history.bestLapTime : 0,
+      bestS1: inEpoch(decoded.bestSectorLaps[0]) ? decoded.history.bestS1 : 0,
+      bestS2: inEpoch(decoded.bestSectorLaps[1]) ? decoded.history.bestS2 : 0,
+      bestS3: inEpoch(decoded.bestSectorLaps[2]) ? decoded.history.bestS3 : 0,
+    });
   }
 
-  private buildPacket(header: F1Header): TelemetryPacket {
+  private buildPacket(sessionTime: number): TelemetryPacket {
     const m = this.motion!;
     const ct = this.carTelemetry!;
     const ld = this.lapData!;
@@ -359,6 +453,12 @@ export class F1StateAccumulator {
     const cd = this.carDamage;
     const mx = this.motionEx;
     const sess = this.session;
+    const playerLast = this.lastSectors(this.playerCarIndex);
+    // Retirement is direct live evidence, not a finish inferred from SEND.
+    // A later authoritative terminal classification can refine that result.
+    const retired = this.retiredCarIndex === this.playerCarIndex &&
+      !(this.finalClassification && this.finalClassification.resultStatus >= 3 && this.finalClassification.resultStatus <= 7);
+    const playerResultStatus = retired ? 7 : this.finalClassification?.resultStatus ?? ld.resultStatus;
 
     const trackId = sess?.trackId == null || sess.trackId < 0 ? "" : String(sess.trackId);
     const player = this.participants[this.playerCarIndex];
@@ -375,11 +475,20 @@ export class F1StateAccumulator {
         const csEntry = cs?.allCars[i];
 
         const history = this.driverHistory.get(i);
+        const current = this.driverLapSectors.get(i)?.get(car.currentLapNum ?? 0);
+        const last = this.lastSectors(i);
         grid.push({
           position: car.position,
           driverId: participant.driverId,
           teamId: participant.teamId,
           name: participant.name,
+          carIndex: i, timingEpoch: this.timingEpoch,
+          currentLapNum: car.currentLapNum, currentSector: car.sector,
+          currentS1: (car.sector ?? -1) >= 1 ? current?.s1 ?? 0 : 0,
+          currentS2: (car.sector ?? -1) >= 2 ? current?.s2 ?? 0 : 0,
+          currentLapValid: car.currentLapInvalid === 0 ? true : car.currentLapInvalid === 1 ? false : undefined,
+          resultStatus: i === this.playerCarIndex ? playerResultStatus : car.resultStatus,
+          lastLapNumber: last ? (car.currentLapNum ?? 0) - 1 : 0,
           currentLapTime: car.currentLapTime,
           lastLapTime: car.lastLapTime,
           bestLapTime: history?.bestLapTime ?? car.bestLapTime,
@@ -393,9 +502,9 @@ export class F1StateAccumulator {
           bestS1: history?.bestS1 ?? 0,
           bestS2: history?.bestS2 ?? 0,
           bestS3: history?.bestS3 ?? 0,
-          lastS1: history?.lastS1 ?? 0,
-          lastS2: history?.lastS2 ?? 0,
-          lastS3: history?.lastS3 ?? 0,
+          lastS1: last?.s1 ?? 0,
+          lastS2: last?.s2 ?? 0,
+          lastS3: last?.s3 ?? 0,
         });
       }
 
@@ -424,14 +533,13 @@ export class F1StateAccumulator {
       sessionType: F1_SESSION_TYPES[sess?.sessionType ?? 0] ?? "unknown",
       totalLaps: sess?.totalLaps ?? 0,
       currentSector: ld.sector,
-      sector1Time: ld.sector1Time,
-      sector2Time: ld.sector2Time,
-      lastS1: this.driverHistory.get(this.playerCarIndex)?.lastS1 ?? 0,
-      lastS2: this.driverHistory.get(this.playerCarIndex)?.lastS2 ?? 0,
-      lastS3: this.driverHistory.get(this.playerCarIndex)?.lastS3 ?? 0,
-      // Per-lap completed sector times from SessionHistory, keyed by lap
-      // number (1-indexed). Let downstream code look up the authoritative
-      // split for a specific lap rather than the fragile "last" pointer.
+      sector1Time: ld.sector >= 1 ? this.driverLapSectors.get(this.playerCarIndex)?.get(ld.currentLapNum)?.s1 ?? 0 : 0,
+      sector2Time: ld.sector >= 2 ? this.driverLapSectors.get(this.playerCarIndex)?.get(ld.currentLapNum)?.s2 ?? 0 : 0,
+      lastS1: playerLast?.s1 ?? 0,
+      lastS2: playerLast?.s2 ?? 0,
+      lastS3: playerLast?.s3 ?? 0,
+      // Current-epoch native/history splits, keyed by lap number (1-indexed).
+      // A positive coherent lapTime distinguishes completed from pending data.
       lapSectors: Object.fromEntries(this.driverLapSectors.get(this.playerCarIndex) ?? []),
       brakeTempFL: ct.brakeTempFL,
       brakeTempFR: ct.brakeTempFR,
@@ -499,9 +607,9 @@ export class F1StateAccumulator {
       penalties: ld.penalties,
       totalWarnings: ld.totalWarnings,
       cornerCuttingWarnings: ld.cornerCuttingWarnings,
-      resultStatus: this.finalClassification?.resultStatus ?? ld.resultStatus,
-      resultReason: this.finalClassification?.resultReason,
-      resultSource: this.finalClassification ? "final-classification" : "lap-data",
+      resultStatus: playerResultStatus,
+      resultReason: retired ? undefined : this.finalClassification?.resultReason,
+      resultSource: retired ? "event" : this.finalClassification ? "final-classification" : "lap-data",
       driverStatus: ld.driverStatus,
       pitLaneTimerActive: ld.pitLaneTimerActive,
       pitLaneTimeInLaneInMS: ld.pitLaneTimeInLaneInMS,
@@ -539,10 +647,10 @@ export class F1StateAccumulator {
 
     const packet: TelemetryPacket = {
       gameId: "f1-2025",
-      sessionUID: header.sessionUID.toString(),
+      sessionUID: this.sessionUID.toString(),
       f1,
       IsRaceOn: 1,
-      TimestampMS: Math.round(header.sessionTime * 1000),
+      TimestampMS: Math.round(sessionTime * 1000),
 
       EngineMaxRpm: cs?.maxRPM ?? 15000,
       EngineIdleRpm: cs?.idleRPM ?? 4000,
@@ -664,7 +772,7 @@ export class F1StateAccumulator {
       BestLap: this.finalClassification?.bestLapTime ?? ld.bestLapTime,
       LastLap: ld.lastLapTime,
       CurrentLap: ld.currentLapTime,
-      CurrentRaceTime: header.sessionTime,
+      CurrentRaceTime: sessionTime,
 
       LapNumber: ld.currentLapNum,
       RacePosition: this.finalClassification?.position ?? ld.position,

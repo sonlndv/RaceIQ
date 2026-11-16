@@ -14,7 +14,7 @@ test("track dashes retain 6/1 metre alpha masking across uneven samples, duplica
   const edge = [{ x: 0, z: 0 }, { x: 2, z: 0 }, { x: 2, z: 0 }, { x: 4, z: 0 }, { x: 4, z: 16 }];
   runtime.setOutline(null, { leftEdge: edge, rightEdge: [], centerLine: [], pitLane: null, coordSystem: "lmu" });
   expect(runtime.edgeRuns).toHaveLength(1);
-  expect(runtime.edgeRuns[0]!.map(p => [p.x + origin.x, p.z + origin.z, p.alpha])).toEqual([
+  expect(runtime.edgeRuns[0]!.map(p => [-p.x + origin.x, p.z + origin.z, p.alpha])).toEqual([
     [0, 0, 1], [2, 0, 1], [4, 0, 1], [4, 2, 1], [4, 2, 0],
     [4, 3, 0], [4, 3, 1], [4, 9, 1], [4, 9, 0], [4, 10, 0],
     [4, 10, 1], [4, 16, 1],
@@ -88,11 +88,11 @@ for (const [gameId, coordSystem, flip] of cases) {
         additionalSections: [{ leftEdge: leftEdge.slice(0, 3), rightEdge: rightEdge.slice(0, 3) }],
       };
       runtime.setOutline(null, boundaries);
-      const expected = (points: Point[]) => points.map(p => ({ x: (flip ? -p.x : p.x) - origin.x, z: p.z - origin.z }));
+      const expected = (points: Point[]) => points.map(p => ({ x: -((flip ? -p.x : p.x) - origin.x), z: p.z - origin.z }));
       expectOnPaths(runtime.edgeRuns, [
         expected(leftEdge), expected(rightEdge), expected(leftEdge.slice(0, 3)), expected(rightEdge.slice(0, 3)),
       ]);
-      expect(runtime.lineRuns[0][0][0]).toMatchObject({ x: driven[0].x - origin.x, z: driven[0].z - origin.z });
+      expect(runtime.lineRuns[0][0][0]).toMatchObject({ x: -(driven[0].x - origin.x), z: driven[0].z - origin.z });
     });
   }
 }
@@ -117,7 +117,7 @@ test("unregistered geometry retains validated coordinate fitting", () => {
   const runtime = geometry("fm-2023", center.map(p => ({ x: p.x + 3, z: p.z })));
   const raw = (points: Point[]) => points.map(p => ({ x: p.x * 10, z: p.z * 10 }));
   runtime.setOutline(null, { leftEdge: raw(leftEdge), rightEdge: raw(rightEdge), centerLine: raw(center), pitLane: null, raceLine: null, coordSystem: "tumftm" });
-  expect(runtime.edgeRuns[0][0].x).toBeCloseTo(leftEdge[0].x + 3 - origin.x, 6);
+  expect(runtime.edgeRuns[0][0].x).toBeCloseTo(-(leftEdge[0].x + 3 - origin.x), 6);
   expect(runtime.edgeRuns[0][0].z).toBeCloseTo(leftEdge[0].z - origin.z, 6);
 });
 

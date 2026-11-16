@@ -124,7 +124,7 @@ test("estimated race-line connectors bridge true gaps up to one second and rejec
   expect(estimatedRaceLineSegments([sample(0, 0, 0), sample(1.0001, 1, 1)], true)).toEqual([]);
 });
 
-test("estimated race-line coordinates remain unchanged while translated relative to scene origin", () => {
+test("estimated race-line coordinates reflect into display space without changing source telemetry", () => {
   const sample = (time: number, x: number, z: number): SpectateSample => ({
     time, run: 0, distance: null, values: { "motion.position-x": x, "motion.position-z": z },
   } as SpectateSample);
@@ -132,7 +132,7 @@ test("estimated race-line coordinates remain unchanged while translated relative
   const estimated = estimatedRaceLineSegments(source);
   const origin = { x: 100, y: 7, z: -40 };
   translateEstimatedRaceLineToScene(estimated, origin, -origin.y);
-  expect(estimated).toEqual([20, -7, 10, 25, -7, 16]);
+  expect(estimated).toEqual([-20, -7, 10, -25, -7, 16]);
   expect(source.map(({ values }) => [values["motion.position-x"], values["motion.position-z"]])).toEqual([[120, -30], [125, -24]]);
 });
 test("wheel history ignores publications but resets for true seek discontinuities", () => {
@@ -298,8 +298,9 @@ test("runtime initializes without pose then applies recovered pose", async () =>
   expect(groups[0]!.visible).toBe(false);
   expect(groups[0]!.position.toArray()).toEqual([0, 0, 0]);
   internals.pose(groups[0]!, { x: 8, y: 2, z: -4, yaw: 1 }, "a");
-  expect(groups[0]!.position.toArray()).toEqual([8, 2, -4]);
-  expect(groups[0]!.rotation.y).toBeCloseTo(1 - Math.PI / 2);
+  expect(groups[0]!.position.toArray()).toEqual([-8, 2, -4]);
+  expect(groups[0]!.rotation.y).toBeCloseTo(-1 - Math.PI / 2);
+  expect(groups[0]!.scale.z).toBe(-1);
 });
 test("frame requests queue before initialization and settle only after matching rendered time", async () => {
   const seeks: number[] = [];

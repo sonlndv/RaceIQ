@@ -7,15 +7,15 @@
 - Catalog version: `0.21.1`
 - Schema version: `v7`
 - Generator: `RaceIQ telemetry-catalog generator@0.21.1`
-- Generator source SHA-256: `a1c55ed39fd6cb5c8dff2f5b00cf9e7daf2b38662ae4b236f33be3b2fd9cf6f1`
-- Content SHA-256: `28da4724e9abbe22736952f708f5326a1b9d5dc17b330a74ef0af6ed7cbb7478`
+- Generator source SHA-256: `b170d24b451685067c26aea365e2dae1bd7ecd8067e6ac213acef55d538f425e`
+- Content SHA-256: `f7c91c5ce8a51abddd444ac5414c39d48079aa9b37baaa4d2b87f44839f6b382`
 
 ## Coverage
 
 | Simulator | Sources | Recorded | Packet | Extension | SDK | YAML | Setup |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | fm-2023 | 96 | 96 | 95 | 1 | 0 | 0 | 0 |
-| f1-2025 | 292 | 292 | 119 | 173 | 0 | 0 | 0 |
+| f1-2025 | 301 | 301 | 119 | 182 | 0 | 0 | 0 |
 | acc | 205 | 172 | 124 | 48 | 0 | 0 | 33 |
 | ac-evo | 258 | 226 | 126 | 100 | 0 | 0 | 32 |
 | iracing | 952 | 702 | 115 | 18 | 324 | 495 | 0 |
@@ -435,6 +435,7 @@
 | `race.competitor.rating` | Competitor rating | structured | dimensionless | count | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `race.competitor.reason-out-id` | Reason Out ID | structured | dimensionless | id | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `race.competitor.reason-out-text` | Reason Out Str | structured | dimensionless | text | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:string |  |
+| `race.competitor.result-status` | Competitor result status | structured | unit:enum | enum | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `race.competitor.scoring-time` | Competitor scoring observation time | number | time | s | scalar |  |  |  |
 | `race.competitor.secondary-sponsor` | Competitor secondary sponsor | structured | dimensionless | text | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:string |  |
 | `race.competitor.server-scored` | Competitor server-scored report | boolean | dimensionless | boolean | scalar |  |  |  |
@@ -675,10 +676,14 @@
 | `timing.competitor.class-estimated-lap-time` | Car Class Est Lap Time | structured | time | s | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `timing.competitor.current-lap-number` | Competitor current lap number | structured | dimensionless | count | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `timing.competitor.current-lap-time` | Competitor current lap time | structured | time | s | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
+| `timing.competitor.current-lap-valid` | Competitor current lap valid | structured | dimensionless | boolean | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:boolean |  |
+| `timing.competitor.epoch` | Competitor timing epoch | structured | dimensionless | count | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `timing.competitor.estimated-time` | Competitor estimated lap-position time | structured | time | s | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `timing.competitor.gap-to-ahead` | Competitor gap to car ahead | structured | time | s | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `timing.competitor.gap-to-leader` | Competitor gap to leader | structured | time | s | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `timing.competitor.lap-fraction` | Competitor lap fraction | structured | dimensionless | fraction | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
+| `timing.competitor.lap-number` | Competitor current lap number | structured | dimensionless | count | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
+| `timing.competitor.last-lap-number` | Competitor completed lap number | structured | dimensionless | count | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `timing.competitor.last-lap-time` | Competitor last lap time | structured | time | s | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `timing.competitor.total-time` | Competitor session time | structured | time | s | variable:0-64 | competitor-index:numeric-ascending | indices: competitor-index (variable:0-64, numeric-ascending); fields: value:number |  |
 | `timing.current-lap` | Current Lap | number | time | s | scalar |  |  |  |
@@ -734,6 +739,9 @@
 | `timing.sector.competitor-best.s1` | Competitor best S1 | structured | time | s | variable:0-* | grid-index:source-order | indices: grid-index (variable:0-*, source-order); fields: value:number |  |
 | `timing.sector.competitor-best.s2` | Competitor best S2 | structured | time | s | variable:0-* | grid-index:source-order | indices: grid-index (variable:0-*, source-order); fields: value:number |  |
 | `timing.sector.competitor-best.s3` | Competitor best S3 | structured | time | s | variable:0-* | grid-index:source-order | indices: grid-index (variable:0-*, source-order); fields: value:number |  |
+| `timing.sector.competitor-current.index` | Competitor current sector | structured | dimensionless | index | variable:0-* | grid-index:source-order | indices: grid-index (variable:0-*, source-order); fields: value:number |  |
+| `timing.sector.competitor-current.s1` | Competitor current S1 | structured | time | s | variable:0-* | grid-index:source-order | indices: grid-index (variable:0-*, source-order); fields: value:number |  |
+| `timing.sector.competitor-current.s2` | Competitor current S2 | structured | time | s | variable:0-* | grid-index:source-order | indices: grid-index (variable:0-*, source-order); fields: value:number |  |
 | `timing.sector.competitor-last.s1` | Competitor last S1 | structured | time | s | variable:0-* | grid-index:source-order | indices: grid-index (variable:0-*, source-order); fields: value:number |  |
 | `timing.sector.competitor-last.s2` | Competitor last S2 | structured | time | s | variable:0-* | grid-index:source-order | indices: grid-index (variable:0-*, source-order); fields: value:number |  |
 | `timing.sector.competitor-last.s3` | Competitor last S3 | structured | time | s | variable:0-* | grid-index:source-order | indices: grid-index (variable:0-*, source-order); fields: value:number |  |

@@ -36,6 +36,20 @@ export class SandboxF1Observer {
     if (!packet) return false;
     const uid = packet.header.sessionUID.toString();
     const at = new Date(receivedAtMs).toISOString();
+    // UID0 auxiliary/history packets do not identify a race or replace its preamble.
+    // A retirement can enrich a known driver's existing context, even after SEND.
+    if (uid === "0") {
+      if (!this.active || packet.kind !== "event" || packet.code !== "RTMT" || frame.length < 34
+        || packet.header.playerCarIndex !== this.active.session.playerCarIndex
+        || !this.active.drivers.some((driver) => driver.carIndex === frame[33])) return false;
+      this.retire(frame[33]!, at);
+      this.active.packetCount++;
+      this.active.lastPacketAt = at;
+      this.active.session.updatedAt = at;
+      this.dirty = true;
+      this.flush(receivedAtMs);
+      return true;
+    }
     // Do not attribute metadata before the first Session packet to another track.
     // Bounded preamble retains participants/history when capture order starts there.
     if (!this.active || this.active.uid !== uid) {
@@ -77,7 +91,9 @@ export class SandboxF1Observer {
       state = this.active!;
     }
     if (packet.kind === "session" && !isAustriaRace(packet)) { this.finish("reset", at); return false; }
-    const key = packet.kind === "history" ? `history:${packet.carIndex}` : String(h.packetId);
+    // Different events (e.g. SEND and RTMT) can share an overall frame.
+    const eventCar = packet.kind === "event" ? packet.code === "PENA" ? frame[35] : packet.code === "RTMT" || packet.code === "COLL" || packet.code === "OVTK" ? frame[33] : "" : "";
+    const key = packet.kind === "history" ? `history:${packet.carIndex}` : packet.kind === "event" ? `event:${packet.code}:${eventCar}` : String(h.packetId);
     const lastFrame = state.seenFrames[key];
     if (lastFrame !== undefined && h.overallFrameIdentifier <= lastFrame) return false;
     state.seenFrames[key] = h.overallFrameIdentifier;
@@ -88,6 +104,7 @@ export class SandboxF1Observer {
     state.session.updatedAt = at;
     state.session.playerCarIndex = h.playerCarIndex < 22 ? h.playerCarIndex : null;
     for (const d of state.drivers) d.isPlayer = d.carIndex === state.session.playerCarIndex;
+    if (packet.kind === "event" && packet.code === "RTMT" && frame.length >= 34 && frame[33]! < 22) this.retire(frame[33]!, at);
     this.apply(packet, at);
     this.dirty = true;
     if (this.urgent || receivedAtMs - this.lastFlush >= 1000 || packet.kind === "participants" || packet.kind === "event") this.flush(receivedAtMs);
@@ -166,6 +183,18 @@ export class SandboxF1Observer {
     driver.laps.push(result);
     this.urgent = true;
     return result;
+  }
+
+  private retire(carIndex: number, at: string): void {
+    const driver = this.driver(carIndex);
+    if (driver.currentLap) this.closeAttempt(driver, "retired", at);
+    else {
+      const last = driver.laps.at(-1);
+      if (last && !last.completed && last.status === "incomplete") {
+        last.status = "retired";
+        last.recordedAt = at;
+      }
+    }
   }
 
   private closeAttempt(driver: SandboxDriver, status: string, at: string): void {

@@ -1,6 +1,6 @@
 import type { TelemetryVariableDefinition } from "@raceiq/shared/telemetry/catalog/contracts";
 import type { Mapping, NativeObject, Reader, ReaderContext, SourceReading } from "./plan";
-import { packetField, readCollectionPath, sources } from "./value";
+import { INVALID_VALUE, packetField, readCollectionPath, sources } from "./value";
 
 function sourceValue(frame: NativeObject, source: string): unknown {
   const packet = frame.packet ?? frame;
@@ -50,6 +50,38 @@ export function trustedNativeExecutor(variable: TelemetryVariableDefinition, map
   const nativeUnit = mapping.nativeUnit.trim().toLowerCase();
   const canonicalUnit = variable.canonicalUnit.trim().toLowerCase();
   const reading = {} as SourceReading;
+  if (variable.id === "timing.current-lap-valid" &&
+      mapping.execution.id === "f1-2025:timing.current-lap-valid:normalized" &&
+      nativeUnit === "boolean" && canonicalUnit === "boolean") {
+    const source = "f1.currentLapInvalid";
+    return (frame, context) => {
+      const value = sourceValue(frame, source);
+      if (value === undefined || value === null) return undefined;
+      return setReading(reading, context, mapping, source, value,
+        value === 0 ? true : value === 1 ? false : INVALID_VALUE);
+    };
+  }
+  if (variable.id === "race.competitor.pit-status" &&
+      mapping.execution.id === "f1-2025:race.competitor.pit-status:normalized" &&
+      nativeUnit === "enum" && canonicalUnit === "enum") {
+    const source = "f1.grid[].pitStatus";
+    const values: boolean[] = [];
+    return (frame, context) => {
+      const input = sourceValue(frame, source);
+      if (input === undefined || input === null) return undefined;
+      if (!Array.isArray(input)) return setReading(reading, context, mapping, source, input, INVALID_VALUE);
+      values.length = input.length;
+      for (let index = 0; index < input.length; index += 1) {
+        const code = input[index];
+        // F1 wire: 0 = none, 1 = pitting, 2 = in pit area. The
+        // canonical structured schema has boolean leaves despite enum unit.
+        if (code !== 0 && code !== 1 && code !== 2)
+          return setReading(reading, context, mapping, source, input, INVALID_VALUE);
+        values[index] = code !== 0;
+      }
+      return setReading(reading, context, mapping, source, input, values);
+    };
+  }
   if (variable.id === "tire.temperature.surface.representative" && nativeUnit === "°f" && canonicalUnit === "°c") {
     const reader = readerFor(variable, mapping);
     if (!reader) return undefined;

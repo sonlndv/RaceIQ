@@ -1,5 +1,6 @@
 import type { LmuLiveContextWire } from "@raceiq/shared/telemetry/lmu-context";
 import type { LapDetectorCoverage, LapInsight } from "@raceiq/analysis-core/racing/analysis/laps/insights/types";
+import type { ReplayEvidence } from "./replay-evidence";
 
 export interface SemanticReplayFrame {
   sequence: number;
@@ -17,5 +18,6 @@ export interface SemanticLapTelemetry {
   insights?: LapInsight[];
   detectorCoverage?: LapDetectorCoverage[];
   parseError?: string | null;
+  evidence?: ReplayEvidence;
   envelopes: SemanticReplayFrame[];
 }

@@ -537,6 +537,38 @@ const SEMANTIC_DEFINITIONS_LIVE: Record<string, SemanticDefinition> = {
     canonicalUnit: "s",
     shape: "structured",
   },
+  "race.competitor.result-status": {
+    label: "Competitor result status", description: "Native result status for each competitor.",
+    parentId: "race.competitor.results", canonicalUnit: "enum", shape: "structured",
+  },
+  "timing.competitor.epoch": {
+    label: "Competitor timing epoch", description: "Session-local flashback generation identifying sector evidence.",
+    parentId: "race.competitor.timing", canonicalUnit: "count", shape: "structured",
+  },
+  "timing.competitor.lap-number": {
+    label: "Competitor current lap number", description: "Native current lap number for each competitor.",
+    parentId: "race.competitor.timing", canonicalUnit: "count", shape: "structured",
+  },
+  "timing.competitor.last-lap-number": {
+    label: "Competitor completed lap number", description: "Lap identity of coherent splits matching the native last-lap total.",
+    parentId: "race.competitor.timing", canonicalUnit: "count", shape: "structured",
+  },
+  "timing.competitor.current-lap-valid": {
+    label: "Competitor current lap valid", description: "Known native current-lap validity for each competitor.",
+    parentId: "race.competitor.timing", canonicalUnit: "boolean", shape: "structured",
+  },
+  "timing.sector.competitor-current.index": {
+    label: "Competitor current sector", description: "Native zero-based current sector for each competitor.",
+    parentId: "timing.sector.competitor-current", canonicalUnit: "index", shape: "structured",
+  },
+  "timing.sector.competitor-current.s1": {
+    label: "Competitor current S1", description: "Completed S1 on the identified current lap; unavailable until complete.",
+    parentId: "timing.sector.competitor-current", canonicalUnit: "s", shape: "structured",
+  },
+  "timing.sector.competitor-current.s2": {
+    label: "Competitor current S2", description: "Completed S2 on the identified current lap; unavailable until complete.",
+    parentId: "timing.sector.competitor-current", canonicalUnit: "s", shape: "structured",
+  },
   "timing.sector.competitor-last.s1": {
     label: "Competitor last S1",
     description: "Last completed sector 1 time for each competitor.",

@@ -6,14 +6,14 @@
     "generator": {
       "name": "RaceIQ telemetry-catalog generator",
       "version": "0.21.1",
-      "sourceHash": "a1c55ed39fd6cb5c8dff2f5b00cf9e7daf2b38662ae4b236f33be3b2fd9cf6f1"
+      "sourceHash": "b170d24b451685067c26aea365e2dae1bd7ecd8067e6ac213acef55d538f425e"
     },
     "sourceHashes": {
       "packages/capture-formats/src/lmu/opponent-snapshot.ts": "c18e10f39668501f9c4742bec8999bc7faeeba2c8ea7b42d60accfbbe4e8f0c6",
       "packages/game-ac-evo/src/parser.ts": "29cb3985fe32c797554d98f107a0c4d76ddcc5279d97e75423365e1a0887f5de",
       "packages/game-acc/src/parser.ts": "ebbcaf92f7a7aa4d60eb3d408dfd6278e8ff97530c5d47c93597cffed0f8a47c",
       "packages/game-ams2/src/normalizer.ts": "0b3a2c0b5cad95cf117d7bd9b2b16f4c3bcf57461f206936b3fdf26bc5680dde",
-      "packages/game-f1-2025/src/f1-state.ts": "3a8a7354ef04ac1515ecccdfe12d37e8a8e160c762fdac10920646039c661cce",
+      "packages/game-f1-2025/src/f1-state.ts": "761003b859bd64a36ebbb3f566f7b381d87b91e4a296b404721e6d215b3aec21",
       "packages/game-fm-2023/src/parser.ts": "71c348b894f84f6086c9582d0cce473bac75a3c85896010a0e5762854718b835",
       "packages/game-iracing-metadata/src/session-info/catalog.ts": "4d39b51587bf71a519991ff91a7781efd01190cd633c8e8ef3f4234fa6affb98",
       "packages/game-iracing/src/normalizer.ts": "bcc73bc4805a310f968b9743e6c9c88a688e3216cd28eecc3ee9f6c3d36b0afc",
@@ -22,7 +22,7 @@
       "server/session-capture/frame-time.ts": "55c44a6cede5e2c5fb1e1c45568fe44b4a9a8b156f260f69bb5d89f9c24935a2",
       "shared/racing/setups/schema.ts": "987941bb8f38520920686ef540e67ce2259fdc962de03ccb959f6b5ef773b28f"
     },
-    "contentHash": "28da4724e9abbe22736952f708f5326a1b9d5dc17b330a74ef0af6ed7cbb7478"
+    "contentHash": "f7c91c5ce8a51abddd444ac5414c39d48079aa9b37baaa4d2b87f44839f6b382"
   },
   "generatedFrom": [
     "packages/tooling-catalog/src/root.ts",
@@ -686,6 +686,7 @@
         "race.competitor.position",
         "race.competitor.push-to-pass-active",
         "race.competitor.push-to-pass-count",
+        "race.competitor.result-status",
         "race.competitor.server-scored",
         "race.competitor.session-flags",
         "race.competitor.team-incident-count",
@@ -730,13 +731,18 @@
         "timing.competitor.best-lap-time",
         "timing.competitor.current-lap-number",
         "timing.competitor.current-lap-time",
+        "timing.competitor.current-lap-valid",
+        "timing.competitor.epoch",
         "timing.competitor.estimated-time",
         "timing.competitor.gap-to-ahead",
         "timing.competitor.gap-to-leader",
         "timing.competitor.lap-fraction",
+        "timing.competitor.lap-number",
+        "timing.competitor.last-lap-number",
         "timing.competitor.last-lap-time",
         "timing.competitor.total-time",
         "timing.sector.competitor-best",
+        "timing.sector.competitor-current",
         "timing.sector.competitor-last"
       ]
     },
@@ -1161,6 +1167,17 @@
         "timing.sector.competitor-best.s1",
         "timing.sector.competitor-best.s2",
         "timing.sector.competitor-best.s3"
+      ]
+    },
+    {
+      "id": "timing.sector.competitor-current",
+      "label": "Competitor current sectors",
+      "description": "Native current sector index and completed splits on each identified competitor lap.",
+      "parentId": "race.competitor.timing",
+      "children": [
+        "timing.sector.competitor-current.index",
+        "timing.sector.competitor-current.s1",
+        "timing.sector.competitor-current.s2"
       ]
     },
     {
@@ -10017,14 +10034,14 @@
           "kind": "normalized",
           "nativeUnit": "ms",
           "sources": [
-            "F1.Header.sessionTime"
+            "RaceIQ.SystemClock"
           ],
           "freshness": "continuous",
-          "normalization": "Math.round(header.sessionTime * 1000)",
+          "normalization": "Math.round(sessionTime * 1000)",
           "description": "f1-2025 maps 1 native source channel into this value.",
           "provenance": {
-            "origin": "parser",
-            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+            "origin": "derivation",
+            "artifact": "packages/tooling-catalog/src/catalog/derived-projections.ts"
           },
           "limitations": [],
           "execution": {
@@ -10033,10 +10050,10 @@
             "version": "0.21.1",
             "deterministic": true,
             "declaredInputs": [
-              "F1.Header.sessionTime"
+              "RaceIQ.SystemClock"
             ],
             "missingDataPolicy": "require-all",
-            "codeHash": "a207f54e36847fb128f71af675a9b40cb5b1202c11bf236718c4ed19e3b990cc"
+            "codeHash": "1e0f5da88fcb199f38a297fcc0f9b26be7b1c11ccec9cf8f5be74adfd282be50"
           }
         },
         "acc": {
@@ -28446,22 +28463,31 @@
         "fm-2023": {
           "kind": "unavailable",
           "reason": "source-not-provided",
-          "description": "No equivalent source value is currently identified for this parser."
+          "description": "This parser does not expose an equivalent source value."
         },
         "f1-2025": {
-          "kind": "unavailable",
-          "reason": "source-not-provided",
-          "description": "No equivalent source value is currently identified for this parser."
+          "kind": "direct",
+          "nativeUnit": "index",
+          "sources": [
+            "f1.grid[].carIndex"
+          ],
+          "freshness": "continuous",
+          "description": "f1-2025 parser exposes 1 linked field.",
+          "provenance": {
+            "origin": "parser",
+            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+          },
+          "limitations": []
         },
         "acc": {
           "kind": "unavailable",
           "reason": "source-not-provided",
-          "description": "No equivalent source value is currently identified for this parser."
+          "description": "This parser does not expose an equivalent source value."
         },
         "ac-evo": {
           "kind": "unavailable",
           "reason": "source-not-provided",
-          "description": "No equivalent source value is currently identified for this parser."
+          "description": "This parser does not expose an equivalent source value."
         },
         "iracing": {
           "kind": "normalized",
@@ -28498,12 +28524,12 @@
         "lmu": {
           "kind": "unavailable",
           "reason": "source-not-provided",
-          "description": "No equivalent source value is currently identified for this parser."
+          "description": "This parser does not expose an equivalent source value."
         },
         "ams2": {
           "kind": "unavailable",
           "reason": "source-not-provided",
-          "description": "No equivalent source value is currently identified for this parser."
+          "description": "This parser does not expose an equivalent source value."
         }
       },
       "valueType": "structured",
@@ -33961,6 +33987,95 @@
             "valueType": "string",
             "dimensions": [
               "dimensionless"
+            ]
+          }
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "id": "race.competitor.result-status",
+      "label": "Competitor result status",
+      "description": "Native result status for each competitor.",
+      "parentId": "race.competitor.results",
+      "canonicalUnit": "enum",
+      "shape": "structured",
+      "games": {
+        "fm-2023": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "f1-2025": {
+          "kind": "direct",
+          "nativeUnit": "enum",
+          "sources": [
+            "f1.grid[].resultStatus"
+          ],
+          "freshness": "continuous",
+          "description": "f1-2025 parser exposes 1 linked field.",
+          "provenance": {
+            "origin": "parser",
+            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+          },
+          "limitations": []
+        },
+        "acc": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ac-evo": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "iracing": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "lmu": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ams2": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        }
+      },
+      "valueType": "structured",
+      "dimensions": [
+        "unit:enum"
+      ],
+      "cardinality": {
+        "kind": "variable",
+        "min": 0,
+        "max": 64
+      },
+      "ordering": [
+        "competitor-index:numeric-ascending"
+      ],
+      "structuredSchema": {
+        "indices": [
+          {
+            "id": "competitor-index",
+            "cardinality": {
+              "kind": "variable",
+              "min": 0,
+              "max": 64
+            },
+            "ordering": "numeric-ascending"
+          }
+        ],
+        "fields": [
+          {
+            "id": "value",
+            "valueType": "number",
+            "dimensions": [
+              "unit:enum"
             ]
           }
         ]
@@ -43574,13 +43689,13 @@
           "kind": "direct",
           "nativeUnit": "text",
           "sources": [
-            "F1.Header.sessionUID.toString"
+            "RaceIQ.ParserState.sessionUID"
           ],
           "freshness": "continuous",
           "description": "f1-2025 maps 1 native source channel into this value.",
           "provenance": {
-            "origin": "parser",
-            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+            "origin": "derivation",
+            "artifact": "packages/tooling-catalog/src/catalog/derived-projections.ts"
           },
           "limitations": []
         },
@@ -52695,6 +52810,184 @@
       "limitations": []
     },
     {
+      "id": "timing.competitor.current-lap-valid",
+      "label": "Competitor current lap valid",
+      "description": "Known native current-lap validity for each competitor.",
+      "parentId": "race.competitor.timing",
+      "canonicalUnit": "boolean",
+      "shape": "structured",
+      "games": {
+        "fm-2023": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "f1-2025": {
+          "kind": "direct",
+          "nativeUnit": "boolean",
+          "sources": [
+            "f1.grid[].currentLapValid"
+          ],
+          "freshness": "continuous",
+          "description": "f1-2025 parser exposes 1 linked field.",
+          "provenance": {
+            "origin": "parser",
+            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+          },
+          "limitations": []
+        },
+        "acc": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ac-evo": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "iracing": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "lmu": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ams2": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        }
+      },
+      "valueType": "structured",
+      "dimensions": [
+        "dimensionless"
+      ],
+      "cardinality": {
+        "kind": "variable",
+        "min": 0,
+        "max": 64
+      },
+      "ordering": [
+        "competitor-index:numeric-ascending"
+      ],
+      "structuredSchema": {
+        "indices": [
+          {
+            "id": "competitor-index",
+            "cardinality": {
+              "kind": "variable",
+              "min": 0,
+              "max": 64
+            },
+            "ordering": "numeric-ascending"
+          }
+        ],
+        "fields": [
+          {
+            "id": "value",
+            "valueType": "boolean",
+            "dimensions": [
+              "dimensionless"
+            ]
+          }
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "id": "timing.competitor.epoch",
+      "label": "Competitor timing epoch",
+      "description": "Session-local flashback generation identifying sector evidence.",
+      "parentId": "race.competitor.timing",
+      "canonicalUnit": "count",
+      "shape": "structured",
+      "games": {
+        "fm-2023": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "f1-2025": {
+          "kind": "direct",
+          "nativeUnit": "count",
+          "sources": [
+            "f1.grid[].timingEpoch"
+          ],
+          "freshness": "continuous",
+          "description": "f1-2025 parser exposes 1 linked field.",
+          "provenance": {
+            "origin": "parser",
+            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+          },
+          "limitations": []
+        },
+        "acc": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ac-evo": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "iracing": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "lmu": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ams2": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        }
+      },
+      "valueType": "structured",
+      "dimensions": [
+        "dimensionless"
+      ],
+      "cardinality": {
+        "kind": "variable",
+        "min": 0,
+        "max": 64
+      },
+      "ordering": [
+        "competitor-index:numeric-ascending"
+      ],
+      "structuredSchema": {
+        "indices": [
+          {
+            "id": "competitor-index",
+            "cardinality": {
+              "kind": "variable",
+              "min": 0,
+              "max": 64
+            },
+            "ordering": "numeric-ascending"
+          }
+        ],
+        "fields": [
+          {
+            "id": "value",
+            "valueType": "number",
+            "dimensions": [
+              "dimensionless"
+            ]
+          }
+        ]
+      },
+      "limitations": []
+    },
+    {
       "id": "timing.competitor.estimated-time",
       "label": "Competitor estimated lap-position time",
       "description": "Estimated session time at each competitor's current track location.",
@@ -53072,6 +53365,184 @@
       "range": {
         "min": 0,
         "max": 1
+      },
+      "limitations": []
+    },
+    {
+      "id": "timing.competitor.lap-number",
+      "label": "Competitor current lap number",
+      "description": "Native current lap number for each competitor.",
+      "parentId": "race.competitor.timing",
+      "canonicalUnit": "count",
+      "shape": "structured",
+      "games": {
+        "fm-2023": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "f1-2025": {
+          "kind": "direct",
+          "nativeUnit": "count",
+          "sources": [
+            "f1.grid[].currentLapNum"
+          ],
+          "freshness": "continuous",
+          "description": "f1-2025 parser exposes 1 linked field.",
+          "provenance": {
+            "origin": "parser",
+            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+          },
+          "limitations": []
+        },
+        "acc": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ac-evo": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "iracing": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "lmu": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ams2": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        }
+      },
+      "valueType": "structured",
+      "dimensions": [
+        "dimensionless"
+      ],
+      "cardinality": {
+        "kind": "variable",
+        "min": 0,
+        "max": 64
+      },
+      "ordering": [
+        "competitor-index:numeric-ascending"
+      ],
+      "structuredSchema": {
+        "indices": [
+          {
+            "id": "competitor-index",
+            "cardinality": {
+              "kind": "variable",
+              "min": 0,
+              "max": 64
+            },
+            "ordering": "numeric-ascending"
+          }
+        ],
+        "fields": [
+          {
+            "id": "value",
+            "valueType": "number",
+            "dimensions": [
+              "dimensionless"
+            ]
+          }
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "id": "timing.competitor.last-lap-number",
+      "label": "Competitor completed lap number",
+      "description": "Lap identity of coherent splits matching the native last-lap total.",
+      "parentId": "race.competitor.timing",
+      "canonicalUnit": "count",
+      "shape": "structured",
+      "games": {
+        "fm-2023": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "f1-2025": {
+          "kind": "direct",
+          "nativeUnit": "count",
+          "sources": [
+            "f1.grid[].lastLapNumber"
+          ],
+          "freshness": "continuous",
+          "description": "f1-2025 parser exposes 1 linked field.",
+          "provenance": {
+            "origin": "parser",
+            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+          },
+          "limitations": []
+        },
+        "acc": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ac-evo": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "iracing": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "lmu": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ams2": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        }
+      },
+      "valueType": "structured",
+      "dimensions": [
+        "dimensionless"
+      ],
+      "cardinality": {
+        "kind": "variable",
+        "min": 0,
+        "max": 64
+      },
+      "ordering": [
+        "competitor-index:numeric-ascending"
+      ],
+      "structuredSchema": {
+        "indices": [
+          {
+            "id": "competitor-index",
+            "cardinality": {
+              "kind": "variable",
+              "min": 0,
+              "max": 64
+            },
+            "ordering": "numeric-ascending"
+          }
+        ],
+        "fields": [
+          {
+            "id": "value",
+            "valueType": "number",
+            "dimensions": [
+              "dimensionless"
+            ]
+          }
+        ]
       },
       "limitations": []
     },
@@ -53566,13 +54037,13 @@
           "kind": "direct",
           "nativeUnit": "s",
           "sources": [
-            "F1.Header.sessionTime"
+            "RaceIQ.ParserState.CurrentRaceTime"
           ],
           "freshness": "continuous",
           "description": "f1-2025 maps 1 native source channel into this value.",
           "provenance": {
-            "origin": "parser",
-            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+            "origin": "derivation",
+            "artifact": "packages/tooling-catalog/src/catalog/derived-projections.ts"
           },
           "limitations": []
         },
@@ -57411,6 +57882,267 @@
           "nativeUnit": "s",
           "sources": [
             "f1.grid[].bestS3"
+          ],
+          "freshness": "continuous",
+          "description": "f1-2025 parser exposes 1 linked field.",
+          "provenance": {
+            "origin": "parser",
+            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+          },
+          "limitations": []
+        },
+        "acc": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ac-evo": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "iracing": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "lmu": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ams2": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        }
+      },
+      "valueType": "structured",
+      "dimensions": [
+        "time"
+      ],
+      "cardinality": {
+        "kind": "variable",
+        "min": 0
+      },
+      "ordering": [
+        "grid-index:source-order"
+      ],
+      "structuredSchema": {
+        "indices": [
+          {
+            "id": "grid-index",
+            "cardinality": {
+              "kind": "variable",
+              "min": 0
+            },
+            "ordering": "source-order"
+          }
+        ],
+        "fields": [
+          {
+            "id": "value",
+            "valueType": "number",
+            "dimensions": [
+              "time"
+            ]
+          }
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "id": "timing.sector.competitor-current.index",
+      "label": "Competitor current sector",
+      "description": "Native zero-based current sector for each competitor.",
+      "parentId": "timing.sector.competitor-current",
+      "canonicalUnit": "index",
+      "shape": "structured",
+      "games": {
+        "fm-2023": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "f1-2025": {
+          "kind": "direct",
+          "nativeUnit": "index",
+          "sources": [
+            "f1.grid[].currentSector"
+          ],
+          "freshness": "continuous",
+          "description": "f1-2025 parser exposes 1 linked field.",
+          "provenance": {
+            "origin": "parser",
+            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+          },
+          "limitations": []
+        },
+        "acc": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ac-evo": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "iracing": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "lmu": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ams2": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        }
+      },
+      "valueType": "structured",
+      "dimensions": [
+        "dimensionless"
+      ],
+      "cardinality": {
+        "kind": "variable",
+        "min": 0
+      },
+      "ordering": [
+        "grid-index:source-order"
+      ],
+      "structuredSchema": {
+        "indices": [
+          {
+            "id": "grid-index",
+            "cardinality": {
+              "kind": "variable",
+              "min": 0
+            },
+            "ordering": "source-order"
+          }
+        ],
+        "fields": [
+          {
+            "id": "value",
+            "valueType": "number",
+            "dimensions": [
+              "dimensionless"
+            ]
+          }
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "id": "timing.sector.competitor-current.s1",
+      "label": "Competitor current S1",
+      "description": "Completed S1 on the identified current lap; unavailable until complete.",
+      "parentId": "timing.sector.competitor-current",
+      "canonicalUnit": "s",
+      "shape": "structured",
+      "games": {
+        "fm-2023": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "f1-2025": {
+          "kind": "direct",
+          "nativeUnit": "s",
+          "sources": [
+            "f1.grid[].currentS1"
+          ],
+          "freshness": "continuous",
+          "description": "f1-2025 parser exposes 1 linked field.",
+          "provenance": {
+            "origin": "parser",
+            "artifact": "packages/game-f1-2025/src/f1-state.ts"
+          },
+          "limitations": []
+        },
+        "acc": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ac-evo": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "iracing": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "lmu": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "ams2": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        }
+      },
+      "valueType": "structured",
+      "dimensions": [
+        "time"
+      ],
+      "cardinality": {
+        "kind": "variable",
+        "min": 0
+      },
+      "ordering": [
+        "grid-index:source-order"
+      ],
+      "structuredSchema": {
+        "indices": [
+          {
+            "id": "grid-index",
+            "cardinality": {
+              "kind": "variable",
+              "min": 0
+            },
+            "ordering": "source-order"
+          }
+        ],
+        "fields": [
+          {
+            "id": "value",
+            "valueType": "number",
+            "dimensions": [
+              "time"
+            ]
+          }
+        ]
+      },
+      "limitations": []
+    },
+    {
+      "id": "timing.sector.competitor-current.s2",
+      "label": "Competitor current S2",
+      "description": "Completed S2 on the identified current lap; unavailable until complete.",
+      "parentId": "timing.sector.competitor-current",
+      "canonicalUnit": "s",
+      "shape": "structured",
+      "games": {
+        "fm-2023": {
+          "kind": "unavailable",
+          "reason": "source-not-provided",
+          "description": "This parser does not expose an equivalent source value."
+        },
+        "f1-2025": {
+          "kind": "direct",
+          "nativeUnit": "s",
+          "sources": [
+            "f1.grid[].currentS2"
           ],
           "freshness": "continuous",
           "description": "f1-2025 parser exposes 1 linked field.",
@@ -73903,7 +74635,7 @@
         "unit": "s",
         "dataType": "number",
         "count": 1,
-        "description": "Sector times from session history (seconds, 0 if unavailable)",
+        "description": "Coherent completed sectors in seconds; 0 means unavailable.",
         "semanticId": "timing.sector.competitor-best.s1",
         "sourceKind": "extension",
         "recordedByRaceIQ": true,
@@ -73934,6 +74666,30 @@
         "retention": "exact"
       },
       {
+        "path": "f1.grid[].carIndex",
+        "label": "Car Index",
+        "unit": "index",
+        "dataType": "number",
+        "count": 1,
+        "description": "Native F1 car slot, independent of running position.",
+        "semanticId": "race.competitor.car-index",
+        "sourceKind": "extension",
+        "recordedByRaceIQ": true,
+        "retention": "exact"
+      },
+      {
+        "path": "f1.grid[].currentLapNum",
+        "label": "Current Lap Num",
+        "unit": "count",
+        "dataType": "number",
+        "count": 1,
+        "description": "Native current lap number for this car.",
+        "semanticId": "timing.competitor.lap-number",
+        "sourceKind": "extension",
+        "recordedByRaceIQ": true,
+        "retention": "exact"
+      },
+      {
         "path": "f1.grid[].currentLapTime",
         "label": "Current Lap Time",
         "unit": "s",
@@ -73941,6 +74697,54 @@
         "count": 1,
         "description": "Grid current Lap Time source value reported by f1-2025 in s.",
         "semanticId": "timing.competitor.current-lap-time",
+        "sourceKind": "extension",
+        "recordedByRaceIQ": true,
+        "retention": "exact"
+      },
+      {
+        "path": "f1.grid[].currentLapValid",
+        "label": "Current Lap Valid",
+        "unit": "boolean",
+        "dataType": "boolean",
+        "count": 1,
+        "description": "Known native current-lap validity for this car.",
+        "semanticId": "timing.competitor.current-lap-valid",
+        "sourceKind": "extension",
+        "recordedByRaceIQ": true,
+        "retention": "exact"
+      },
+      {
+        "path": "f1.grid[].currentS1",
+        "label": "Current S1",
+        "unit": "s",
+        "dataType": "number",
+        "count": 1,
+        "description": "Completed S1 on this car's identified current lap; zero until complete.",
+        "semanticId": "timing.sector.competitor-current.s1",
+        "sourceKind": "extension",
+        "recordedByRaceIQ": true,
+        "retention": "exact"
+      },
+      {
+        "path": "f1.grid[].currentS2",
+        "label": "Current S2",
+        "unit": "s",
+        "dataType": "number",
+        "count": 1,
+        "description": "Completed S2 on this car's identified current lap; zero until complete.",
+        "semanticId": "timing.sector.competitor-current.s2",
+        "sourceKind": "extension",
+        "recordedByRaceIQ": true,
+        "retention": "exact"
+      },
+      {
+        "path": "f1.grid[].currentSector",
+        "label": "Current Sector",
+        "unit": "index",
+        "dataType": "number",
+        "count": 1,
+        "description": "Native zero-based current sector for this car.",
+        "semanticId": "timing.sector.competitor-current.index",
         "sourceKind": "extension",
         "recordedByRaceIQ": true,
         "retention": "exact"
@@ -73977,6 +74781,18 @@
         "count": 1,
         "description": "Grid gap To Leader source value reported by f1-2025 in s.",
         "semanticId": "timing.competitor.gap-to-leader",
+        "sourceKind": "extension",
+        "recordedByRaceIQ": true,
+        "retention": "exact"
+      },
+      {
+        "path": "f1.grid[].lastLapNumber",
+        "label": "Last Lap Number",
+        "unit": "count",
+        "dataType": "number",
+        "count": 1,
+        "description": "Lap number of coherent splits matching this car's native last-lap total.",
+        "semanticId": "timing.competitor.last-lap-number",
         "sourceKind": "extension",
         "recordedByRaceIQ": true,
         "retention": "exact"
@@ -74090,6 +74906,18 @@
         "retention": "exact"
       },
       {
+        "path": "f1.grid[].resultStatus",
+        "label": "Result Status",
+        "unit": "enum",
+        "dataType": "number",
+        "count": 1,
+        "description": "Native result status; inactive/terminal cars have no live sector comparison.",
+        "semanticId": "race.competitor.result-status",
+        "sourceKind": "extension",
+        "recordedByRaceIQ": true,
+        "retention": "exact"
+      },
+      {
         "path": "f1.grid[].teamId",
         "label": "Team Id",
         "unit": "id",
@@ -74097,6 +74925,18 @@
         "count": 1,
         "description": "F1 team identifier for each competitor.",
         "semanticId": "race.competitor.team-id",
+        "sourceKind": "extension",
+        "recordedByRaceIQ": true,
+        "retention": "exact"
+      },
+      {
+        "path": "f1.grid[].timingEpoch",
+        "label": "Timing Epoch",
+        "unit": "count",
+        "dataType": "number",
+        "count": 1,
+        "description": "Session-local timing epoch, incremented on flashback.",
+        "semanticId": "timing.competitor.epoch",
         "sourceKind": "extension",
         "recordedByRaceIQ": true,
         "retention": "exact"
@@ -74633,7 +75473,7 @@
         "path": "f1.resultSource",
         "label": "Result Source",
         "unit": "unitless",
-        "dataType": "\"lap-data\" | \"final-classification\"",
+        "dataType": "\"lap-data\" | \"final-classification\" | \"event\"",
         "count": 1,
         "description": "Result Source source value reported by f1-2025 in unitless.",
         "semanticId": "diagnostics.result-source",
@@ -96633,7 +97473,7 @@
   },
   "coverage": {
     "normalizedPacketFields": 151,
-    "semanticVariables": 850,
+    "semanticVariables": 858,
     "sourceCounts": {
       "fm-2023": {
         "total": 96,
@@ -96645,13 +97485,13 @@
         "recorded": 96
       },
       "f1-2025": {
-        "total": 292,
+        "total": 301,
         "packet": 119,
-        "extension": 173,
+        "extension": 182,
         "sdk": 0,
         "yaml": 0,
         "setup": 0,
-        "recorded": 292
+        "recorded": 301
       },
       "acc": {
         "total": 205,

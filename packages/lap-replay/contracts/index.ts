@@ -1,4 +1,5 @@
 export type { SemanticLapTelemetry, SemanticReplayFrame } from "./replay";
+export type { ReplayEvidence, ReplayEvent, ReplayCaptureRun, ReplayEventKind } from "./replay-evidence";
 export { SEMANTIC_REPLAY_MEDIA_TYPE, createSemanticReplayEncoder, decodeSemanticLapTelemetry, packSemanticLapTelemetry } from "./replay-wire";
 export type { CompactSemanticLapTelemetry } from "./replay-wire";
 export type { SpectateController, SpectateLap, ReplayOpponentMetadata, ReplaySession, SpectatePair, SpectatePose, SpectateReading, SpectateSample, SpectateSegment, SpectateSnapshot } from "./spectate";

@@ -111,6 +111,35 @@ function frameMetadata(value: unknown): value is Record<string, unknown> & Pick<
   return record(value) && Number.isSafeInteger(value.sequence) && timestamp(value.observedAt) && timestamp(value.receivedAt) && typeof value.simulator === "string";
 }
 
+function replayEvidence(value: unknown, frameCount: number): boolean {
+  if (!record(value) || value.schemaVersion !== 1 || !Array.isArray(value.runs) || !Array.isArray(value.events)) return false;
+  const text = (item: unknown) => typeof item === "string" && item.length > 0;
+  const index = (item: unknown) => Number.isSafeInteger(item) && Number(item) >= 0 && Number(item) < frameCount;
+  let end = -1;
+  for (const [id, run] of value.runs.entries()) {
+    if (!record(run) || run.id !== id || !index(run.startFrame) || !index(run.endFrame) || Number(run.startFrame) !== end + 1 || Number(run.endFrame) < Number(run.startFrame) || !["start", "clock-reset", "capture-gap"].includes(String(run.reason))) return false;
+    end = Number(run.endFrame);
+  }
+  if (end !== frameCount - 1) return false;
+  for (const event of value.events) {
+    if (!record(event) || !["flashback", "invalidation", "penalty", "retirement", "capture-gap"].includes(String(event.kind)) || !(event.frameIndex === null || index(event.frameIndex)) || !text(event.reason) || !text(event.source)) return false;
+    const pose = event.nearbyPose;
+    if (pose !== undefined && (!record(pose) || !["x", "z", "offsetSeconds"].every(key => typeof pose[key] === "number" && Number.isFinite(pose[key])) || Math.abs(Number(pose.offsetSeconds)) > 0.1)) return false;
+    const penalty = event.penalty;
+    if (penalty !== undefined && (!record(penalty) || !["penaltyType", "infringementType", "carIndex", "otherCarIndex", "seconds", "lapNumber", "placesGained"].every(key => Number.isSafeInteger(penalty[key]) && Number(penalty[key]) >= 0 && Number(penalty[key]) <= 255))) return false;
+  }
+  for (const [key, states] of [
+    ["gameValidity", ["valid", "invalid", "unavailable"]],
+    ["raceiqValidation", ["valid", "invalid"]],
+    ["cleanPace", ["eligible", "ineligible", "unavailable"]],
+    ["recording", ["complete", "partial", "unavailable"]],
+  ] as const) {
+    const status = value[key];
+    if (!record(status) || !states.some(state => state === status.state) || !text(status.reason) || !text(status.source)) return false;
+  }
+  return record(value.nativeEvents) && ["available", "unavailable"].includes(String(value.nativeEvents.state)) && text(value.nativeEvents.reason);
+}
+
 function lapMetadata(value: Record<string, unknown>): boolean {
   const numbers = (items: unknown) => items === undefined || items === null || Array.isArray(items) && items.every((item) => typeof item === "number" && Number.isFinite(item));
   return Number.isSafeInteger(value.lapId) && Array.isArray(value.requestedSemanticIds) && value.requestedSemanticIds.every((id) => typeof id === "string") &&
@@ -177,6 +206,7 @@ function decodeContext(value: unknown, supplemental: readonly LmuObservationWire
 /** Decode the negotiated wire representation into the unchanged replay consumer model. */
 export function decodeSemanticLapTelemetry(value: unknown): SemanticLapTelemetry {
   if (!record(value) || !lapMetadata(value) || !Array.isArray(value.envelopes)) invalid();
+  if (value.evidence !== undefined && !replayEvidence(value.evidence, value.envelopes.length)) invalid();
   const validated = new WeakSet<object>();
   const visiting = new WeakSet<object>();
   if (!Object.hasOwn(value, "format")) {

@@ -15,6 +15,7 @@ import { clearCaptureManifestCache, clearSessionCaptureCache, iterateSessionCapt
 import { withSessionCaptureMaintenanceLock } from "./cleanup";
 import { persistCaptureManifest } from "./manifest-persistence";
 import { and, eq, inArray, like, or } from "drizzle-orm";
+import { recoverNativeIncompleteTail } from "./recover-native-tail";
 
 export interface DirectCaptureRepairResult { repaired: number; failed: number; deferred: boolean }
 type SessionRow = typeof sessions.$inferSelect;
@@ -46,7 +47,7 @@ function mayUseRecovery(error: unknown): boolean {
   if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
   return error instanceof SyntaxError || (error instanceof Error && error.name === "SchemaError");
 }
-async function validateChunk(path: string, chunk: Manifest["chunks"][number], gameId: GameId): Promise<void> {
+async function validateChunk(path: string, chunk: Manifest["chunks"][number], gameId: GameId): Promise<{ nativeFrameCount: number; ownedSourceByteOffset?: number; ownedSourceFrameStart?: number }> {
   if ((await stat(path)).size !== chunk.byteLength) fail(`Chunk ${chunk.id} byte length mismatch`);
   const source = { rawFile: path, source: null, gameId, carId: "", trackId: "", captureFormatVersion: 1 };
   let nativeOffset = chunk.sourceByteStart;
@@ -55,16 +56,22 @@ async function validateChunk(path: string, chunk: Manifest["chunks"][number], ga
   let firstOwnedOffset: number | undefined;
   let trailingFrames = 0;
   let bootstrapSeen = false;
+  let inContext = false;
+  let nativeFrameCount = 0;
+  let ownedSourceByteOffset: number | undefined;
+  let ownedSourceFrameStart: number | undefined;
   for await (const record of iterateSessionCaptureRecordsFromSource(source, { strict: true, allowLegacyFullFrames: true })) {
-    if (record.offset < chunk.sourceRecordByteOffset!) {
-      if (record.kind === "parser-bootstrap" && chunk.parserBootstrapHash !== undefined) {
-        if (bootstrapSeen || record.gameId !== gameId || createHash("sha256").update(record.payload).digest("hex") !== chunk.parserBootstrapHash) {
-          fail(`Chunk ${chunk.id} parser bootstrap mismatch`);
-        }
-        bootstrapSeen = true;
+    // The initial chunk can contain parser priming inside its source range;
+    // rotated chunks carry it before that range. Validate both forms.
+    if (record.kind === "parser-bootstrap" && chunk.parserBootstrapHash !== undefined) {
+      if (bootstrapSeen || record.gameId !== gameId || createHash("sha256").update(record.payload).digest("hex") !== chunk.parserBootstrapHash) {
+        fail(`Chunk ${chunk.id} parser bootstrap mismatch`);
       }
-      continue;
+      bootstrapSeen = true;
     }
+    if (record.kind === "segment-context") inContext = true;
+    if (record.kind === "segment-context-end") inContext = false;
+    if (record.offset < chunk.sourceRecordByteOffset!) continue;
     if (recordCount >= chunk.recordCount) {
       if (record.kind !== "frame") fail(`Chunk ${chunk.id} has unexpected trailing metadata`);
       trailingFrames++;
@@ -73,9 +80,16 @@ async function validateChunk(path: string, chunk: Manifest["chunks"][number], ga
     if (recordCount === 0 && record.offset !== chunk.sourceRecordByteOffset) fail(`Chunk ${chunk.id} source offset is not record-aligned`);
     if (record.kind === "frame") {
       const nativeLength = getLMUPartitionSourceLength(record.frame) ?? record.frame.length;
+      if (!inContext) {
+        if (chunk.kind === "lap" && record.offset >= chunk.ownedFrameByteOffset!) {
+          firstOwnedOffset ??= record.offset;
+          ownedSourceByteOffset ??= nativeOffset;
+          ownedSourceFrameStart ??= nativeFrameCount;
+          ownedFrames++;
+        }
+        nativeFrameCount++;
+      }
       nativeOffset += encodeFrameLength(nativeLength, record.frameTimeMs).length + nativeLength;
-      firstOwnedOffset ??= record.offset;
-      ownedFrames++;
     } else {
       nativeOffset += record.endOffset - record.offset;
     }
@@ -86,15 +100,20 @@ async function validateChunk(path: string, chunk: Manifest["chunks"][number], ga
   if (chunk.kind === "lap" && (ownedFrames !== chunk.ownedFrameCount || firstOwnedOffset !== chunk.ownedFrameByteOffset)) {
     fail(`Chunk ${chunk.id} lap ownership mismatch`);
   }
-  if (trailingFrames !== (chunk.trailingContextFrameCount ?? 0)) fail(`Chunk ${chunk.id} trailing context mismatch`);
+  // Auxiliary chunks omit ownership metadata and may retain one closing frame.
+  // Lap chunks declare their trailing context explicitly.
+  if (chunk.kind === "lap" ? trailingFrames !== (chunk.trailingContextFrameCount ?? 0) : trailingFrames > 1) fail(`Chunk ${chunk.id} trailing context mismatch`);
+  return { nativeFrameCount, ownedSourceByteOffset, ownedSourceFrameStart };
 }
-async function inspect(manifestPath: string, manifest: Manifest, owner: SessionRow, lapRows: LapRow[]): Promise<void> {
+async function inspect(manifestPath: string, manifest: Manifest, owner: SessionRow, lapRows: LapRow[]): Promise<Map<string, number>> {
   if (manifest.version !== 3 || manifest.sourceCoordinates !== "native-wire-v1" || manifest.gameId !== owner.gameId) fail("Unsupported direct capture manifest");
   const root = await realpath(dirname(manifestPath));
   const chunkIds = new Set<string>();
   const lapIds = new Set<string>();
   let ordinal = 0;
   let sourceByte = META_FRAME_BYTES;
+  let sourceFrame = 0;
+  const sourceFrameStarts = new Map<string, number>();
   for (const chunk of manifest.chunks) {
     if (chunk.firstOrdinal !== ordinal || chunk.sourceStart !== ordinal || chunk.sourceEnd - chunk.sourceStart !== chunk.recordCount || chunk.sourceByteStart !== sourceByte || chunk.sourceByteEnd < sourceByte) fail(`Chunk ${chunk.id} has discontinuous coordinates`);
     if (chunkIds.has(chunk.id)) fail(`Duplicate chunk ID ${chunk.id}`);
@@ -103,11 +122,17 @@ async function inspect(manifestPath: string, manifest: Manifest, owner: SessionR
       if (!chunk.lapId || chunk.lapNumber === undefined || chunk.ownedFrameByteOffset === undefined || chunk.ownedFrameCount === undefined || lapIds.has(chunk.lapId)) fail(`Invalid or duplicate lap chunk ${chunk.id}`);
       const lap = lapRows.find((row) => String(row.id) === chunk.lapId);
       if (!lap) fail(`Manifest references unknown lap ${chunk.lapId}`);
-      if (lap.lapNumber !== chunk.lapNumber || lap.rawByteOffset !== chunk.sourceByteStart || lap.rawFrameCount !== chunk.ownedFrameCount) fail(`Lap ${lap.id} ownership mismatch`);
+      if (lap.lapNumber !== chunk.lapNumber || lap.rawFrameCount !== chunk.ownedFrameCount) fail(`Lap ${lap.id} ownership mismatch`);
       lapIds.add(chunk.lapId);
     } else if (chunk.lapId !== undefined || chunk.lapNumber !== undefined || chunk.ownedFrameByteOffset !== undefined || chunk.ownedFrameCount !== undefined) fail(`Auxiliary chunk ${chunk.id} has lap ownership`);
     if (chunk.recordCount > 0 && chunk.sourceRecordByteOffset === undefined) fail(`Chunk ${chunk.id} lacks sourceRecordByteOffset`);
-    await validateChunk(await safeFile(chunk.path, root), chunk, manifest.gameId);
+    const evidence = await validateChunk(await safeFile(chunk.path, root), chunk, manifest.gameId);
+    if (chunk.kind === "lap") {
+      const lap = lapRows.find((row) => String(row.id) === chunk.lapId)!;
+      if (lap.rawByteOffset !== evidence.ownedSourceByteOffset || evidence.ownedSourceFrameStart === undefined) fail(`Lap ${lap.id} ownership mismatch`);
+      sourceFrameStarts.set(chunk.lapId!, sourceFrame + evidence.ownedSourceFrameStart);
+    }
+    sourceFrame += evidence.nativeFrameCount;
     ordinal = chunk.sourceEnd;
     sourceByte = chunk.sourceByteEnd;
   }
@@ -133,12 +158,13 @@ async function inspect(manifestPath: string, manifest: Manifest, owner: SessionR
     }
     if (companionRecords !== companion.committedPrefix.recordCount) fail("Companion committed record count mismatch");
   }
+  return sourceFrameStarts;
 }
 function fullyPublished(owner: SessionRow, manifest: Manifest, lapRows: LapRow[], path: string): boolean {
   return owner.rawFile === path && owner.captureManifestFile === path && owner.captureLayoutVersion === 1 &&
     manifest.chunks.filter((chunk) => chunk.kind === "lap").every((chunk) => {
       const lap = lapRows.find((row) => String(row.id) === chunk.lapId);
-      return !!lap && lap.captureChunkId === chunk.id && lap.sourceFrameStart === chunk.firstOrdinal && lap.sourceFrameCount === chunk.ownedFrameCount;
+      return !!lap && lap.captureChunkId === chunk.id && lap.sourceFrameStart !== null && lap.sourceFrameStart >= 0 && lap.sourceFrameCount === chunk.ownedFrameCount;
     }) &&
     lapRows.every((lap) => lap.captureChunkId === null || manifest.chunks.some((chunk) => chunk.kind === "lap" && chunk.id === lap.captureChunkId && chunk.lapId === String(lap.id)));
 }
@@ -202,9 +228,11 @@ export async function repairDirectCaptureManifests(): Promise<DirectCaptureRepai
         if (primary) candidate = primary;
         else candidate = await parseRecoveryManifest(`${path}.recovery`);
         if (owners.length !== 1) fail("Manifest is referenced by multiple sessions");
-        if (primary?.version === 3 && fullyPublished(owner, primary, ownedLaps, path)) continue;
+        const recovered = await recoverNativeIncompleteTail(path, candidate, ownedLaps);
+        if (recovered !== candidate) { candidate = recovered; backupRequired = true; }
+        if (primary?.version === 3 && candidate === primary && fullyPublished(owner, primary, ownedLaps, path)) continue;
         if (owner.rawFile !== path && owner.captureManifestFile !== path) fail("Manifest reference changed");
-        await inspect(path, candidate, owner, ownedLaps);
+        const sourceFrameStarts = await inspect(path, candidate, owner, ownedLaps);
         if (isSessionActive()) return { repaired, failed, deferred: true };
         await withDatabaseWrite(() => db.transaction(async (tx) => recheck(tx, owner, ownedLaps, path)));
         if (isSessionActive()) return { repaired, failed, deferred: true };
@@ -215,7 +243,7 @@ export async function repairDirectCaptureManifests(): Promise<DirectCaptureRepai
           for (const chunk of candidate.chunks) {
             if (chunk.kind !== "lap") continue;
             const lap = ownedLaps.find((row) => String(row.id) === chunk.lapId)!;
-            await tx.update(laps).set({ captureChunkId: chunk.id, sourceFrameStart: chunk.firstOrdinal, sourceFrameCount: chunk.ownedFrameCount }).where(and(eq(laps.id, lap.id), eq(laps.sessionId, owner.id))).run();
+            await tx.update(laps).set({ captureChunkId: chunk.id, sourceFrameStart: sourceFrameStarts.get(chunk.lapId!)!, sourceFrameCount: chunk.ownedFrameCount }).where(and(eq(laps.id, lap.id), eq(laps.sessionId, owner.id))).run();
           }
           await tx.update(sessions).set({ rawFile: path, captureManifestFile: path, captureLayoutVersion: 1 }).where(eq(sessions.id, owner.id)).run();
         }));

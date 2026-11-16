@@ -2,6 +2,7 @@ import { useMessages } from "./host"
 import { useMemo, useSyncExternalStore } from "react";
 import type { SpectateController, ReplaySession, SpectateSegment } from "../contracts/spectate";
 import { focusRuns, type SpectateFocus } from "./spectate-focus";
+import { replayDisplayX } from "./replay-display-coordinates";
 
 type TrackPoint = { distance: number; run: number; x: number; z: number };
 function trackRuns(pair: ReplaySession): TrackPoint[][] {
@@ -12,13 +13,13 @@ function trackRuns(pair: ReplaySession): TrackPoint[][] {
     const x = sample.values["motion.position-x"],
       z = sample.values["motion.position-z"];
     const distance = pair.a.trackLengthM ? sample.values["timing.distance-traveled"] : sample.distance;
-    if (typeof distance !== "number" || !Number.isFinite(distance) || !Number.isFinite(x) || !Number.isFinite(z)) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
       if (current.length) runs.push(current);
       current = [];
       prior = null;
       continue;
     }
-    const point = { distance, run: sample.run, x: x as number, z: z as number };
+    const point = { distance: typeof distance === "number" ? distance : Number.NaN, run: sample.run, x: x as number, z: z as number };
     if (prior && (prior.run !== point.run || point.distance < prior.distance)) {
       if (current.length) runs.push(current);
       current = [];
@@ -79,7 +80,7 @@ function segmentPaths(runs: readonly TrackPoint[][], start: number, end: number,
 /** Interpolate boundary times on the physical-distance grid, never sample indices. */
 function splitLookup(pair: ReplaySession) {
   const traces = pair.comparison.traces;
-  if (!traces) return () => null;
+  if (!traces || pair.a.alignmentUnavailable || pair.b?.alignmentUnavailable) return () => null;
   const { distance, elapsedTimeA, elapsedTimeB } = traces;
   const valid = distance.length > 1 && [elapsedTimeA, elapsedTimeB].every((times) =>
     times.length === distance.length && times.every((time, index) =>
@@ -117,25 +118,11 @@ function splitText(delta: number | null, unavailable: string) {
   return delta === null ? unavailable : `${delta > 0 ? "+" : ""}${delta.toFixed(3)} s`;
 }
 
-export function SpectateOverview({ pair, controller, segments, focus }: { pair: ReplaySession; controller: SpectateController; segments: readonly SpectateSegment[]; focus: SpectateFocus }) { const m = useMessages(); const coloredRuns = useMemo(() => [focusRuns(pair.a.samples, focus, "opponentLapId" in pair.a.replay ? 0.3 : pair.a.maximumGapSeconds), ...(pair.b ? [focusRuns(pair.b.samples, focus, "opponentLapId" in pair.b.replay ? 0.3 : pair.b.maximumGapSeconds)] : [])], [pair, focus]);
-const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-const splitAt = useMemo(() => splitLookup(pair), [pair]);
-  const hasAuthoritativeOpponentLength = !("opponentLapId" in pair.a.replay) || (typeof pair.a.trackLengthM === "number" && Number.isFinite(pair.a.trackLengthM) && pair.a.trackLengthM > 0);
-  const rows = useMemo(
-    () =>
-      hasAuthoritativeOpponentLength ? segments
-        .filter((segment) => Number.isFinite(segment.startFrac) && Number.isFinite(segment.endFrac) && segment.startFrac >= 0 && segment.startFrac <= 1 && segment.endFrac >= 0 && segment.endFrac <= 1)
-        .map((segment, index) => ({ segment, number: index + 1, delta: splitAt(segment) })) : [],
-    [segments, splitAt, hasAuthoritativeOpponentLength],
-  );
-const runs = useMemo(() => trackRuns(pair), [pair]);
-const maximum = pair.a.trackLengthM ?? pair.comparison.traces?.distance.at(-1) ?? pair.a.distance;
-const distanceOrigin = useMemo(() => {
-  if (!pair.a.trackLengthM) return 0;
-  const sample = pair.a.samples.find((item) => Number.isFinite(item.distance) && typeof item.values["timing.distance-traveled"] === "number");
-  return sample ? Number(sample.values["timing.distance-traveled"]) - sample.distance : 0;
-}, [pair.a]);
-const geometry = useMemo(() => {
+export function overviewGeometry(
+  runs: readonly TrackPoint[][],
+  maximum: number,
+  rows: readonly { segment: SpectateSegment; number: number; delta: number | null }[],
+) {
   let minX = Infinity,
     maxX = -Infinity,
     minZ = Infinity,
@@ -149,12 +136,12 @@ const geometry = useMemo(() => {
       maxZ = Math.max(maxZ, point.z);
       pointCount++;
     }
-  if (pointCount < 2 || (!pair.a.hasProgress && !pair.a.trackLengthM) || !(maximum > 0)) return null;
+  if (pointCount < 2 || rows.length > 0 && !(maximum > 0)) return null;
   const bounds = { minX, maxX, minZ, maxZ };
   // Leave room for numbered markers outside the track stroke.
   const scale = Math.min(152 / (bounds.maxX - bounds.minX || 1), 60 / (bounds.maxZ - bounds.minZ || 1));
   const project = (point: { x: number; z: number }) => ({
-    x: (200 - (bounds.maxX - bounds.minX) * scale) / 2 + (point.x - bounds.minX) * scale,
+    x: (200 - (bounds.maxX - bounds.minX) * scale) / 2 + (replayDisplayX(point.x) - replayDisplayX(bounds.maxX)) * scale,
     y: (108 - (bounds.maxZ - bounds.minZ) * scale) / 2 + (point.z - bounds.minZ) * scale,
   });
   const projectString = (point: { x: number; z: number }) => {
@@ -185,9 +172,11 @@ const geometry = useMemo(() => {
     const projectedAnchor = anchor ? project(anchor) : null;
     let marker: { x: number; y: number } | null = null;
     if (projectedAnchor) {
-      const before = positionAcrossRuns(runs, Math.max(0, fraction * maximum - maximum * 0.002));
-      const after = positionAcrossRuns(runs, Math.min(maximum, fraction * maximum + maximum * 0.002));
-      let nx = before && after ? -(after.z - before.z) : projectedAnchor.x - 100;
+      const beforePoint = positionAcrossRuns(runs, Math.max(0, fraction * maximum - maximum * 0.002));
+      const afterPoint = positionAcrossRuns(runs, Math.min(maximum, fraction * maximum + maximum * 0.002));
+      const before = beforePoint ? project(beforePoint) : null;
+      const after = afterPoint ? project(afterPoint) : null;
+      let nx = before && after ? -(after.y - before.y) : projectedAnchor.x - 100;
       let ny = before && after ? after.x - before.x : projectedAnchor.y - 54;
       if (nx * (projectedAnchor.x - 100) + ny * (projectedAnchor.y - 54) < 0) {
         nx = -nx;
@@ -211,6 +200,28 @@ const geometry = useMemo(() => {
     return { number, segment, delta, anchor: projectedAnchor, position: marker, seekable: seekPosition !== null, sectionPaths: segmentPaths(runs, segment.startFrac, segment.endFrac, maximum, projectString) };
   });
   return { project, paths: runs.filter((run) => run.length > 1).map((run) => run.map(projectString).join(" ")), markers };
+}
+
+export function SpectateOverview({ pair, controller, segments, focus }: { pair: ReplaySession; controller: SpectateController; segments: readonly SpectateSegment[]; focus: SpectateFocus }) { const m = useMessages(); const coloredRuns = useMemo(() => [focusRuns(pair.a.samples, focus, "opponentLapId" in pair.a.replay ? 0.3 : pair.a.maximumGapSeconds), ...(pair.b ? [focusRuns(pair.b.samples, focus, "opponentLapId" in pair.b.replay ? 0.3 : pair.b.maximumGapSeconds)] : [])], [pair, focus]);
+const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+const splitAt = useMemo(() => splitLookup(pair), [pair]);
+  const hasAuthoritativeOpponentLength = !("opponentLapId" in pair.a.replay) || (typeof pair.a.trackLengthM === "number" && Number.isFinite(pair.a.trackLengthM) && pair.a.trackLengthM > 0);
+  const rows = useMemo(
+    () =>
+      hasAuthoritativeOpponentLength && !pair.a.alignmentUnavailable && (pair.a.hasProgress || pair.a.trackLengthM) ? segments
+        .filter((segment) => Number.isFinite(segment.startFrac) && Number.isFinite(segment.endFrac) && segment.startFrac >= 0 && segment.startFrac <= 1 && segment.endFrac >= 0 && segment.endFrac <= 1)
+        .map((segment, index) => ({ segment, number: index + 1, delta: splitAt(segment) })) : [],
+    [segments, splitAt, hasAuthoritativeOpponentLength, pair.a.alignmentUnavailable, pair.a.hasProgress, pair.a.trackLengthM],
+  );
+const runs = useMemo(() => trackRuns(pair), [pair]);
+const maximum = pair.a.trackLengthM ?? pair.comparison.traces?.distance.at(-1) ?? pair.a.distance;
+const distanceOrigin = useMemo(() => {
+  if (!pair.a.trackLengthM) return 0;
+  const sample = pair.a.samples.find((item) => Number.isFinite(item.distance) && typeof item.values["timing.distance-traveled"] === "number");
+  return sample ? Number(sample.values["timing.distance-traveled"]) - sample.distance : 0;
+}, [pair.a]);
+const geometry = useMemo(() => {
+  return overviewGeometry(runs, maximum, rows);
 }, [maximum, rows, runs]);
 const projectedFocusRuns = useMemo(() => geometry ? coloredRuns.map((runs) => runs.map((run) => ({
   token: run.token,
@@ -274,6 +285,19 @@ return (
             )}
           </g>
         ))}
+        {[pair.a, ...(pair.b ? [pair.b] : [])].flatMap((lap, side) => (lap.events ?? []).map((event, index) => {
+          if (!event.nearbyPose) return null;
+          const point = geometry.project(event.nearbyPose);
+          const label = `${pair.b ? side === 0 ? "A · " : "B · " : ""}${event.kind}: ${event.reason} Source: ${event.source}. Nearby recorded pose (${event.nearbyPose.offsetSeconds.toFixed(3)} s), not an exact incident location.`;
+          return <g key={`event-${side}-${index}`} role={event.frameIndex === null ? "img" : "button"} tabIndex={event.frameIndex === null ? undefined : 0} aria-label={label}
+            data-replay-map-event={event.kind}
+            onClick={event.frameIndex === null ? undefined : () => controller.seekFrame(side === 0 ? "a" : "b", event.frameIndex!)}
+            onKeyDown={event.frameIndex === null ? undefined : key => { if (key.key === "Enter" || key.key === " ") { key.preventDefault(); controller.seekFrame(side === 0 ? "a" : "b", event.frameIndex!); } }}>
+            <title>{label}</title>
+            <circle cx={point.x} cy={point.y} r="4" fill="var(--status-warning)" stroke="var(--app-bg)" strokeWidth="1" />
+            <text x={point.x} y={point.y} fontSize="5" dominantBaseline="central" textAnchor="middle" fill="var(--app-bg)">{event.kind === "flashback" ? "F" : event.kind === "invalidation" ? "I" : event.kind === "penalty" ? "P" : event.kind === "retirement" ? "D" : "G"}</text>
+          </g>;
+        }))}
         {poseA && Number.isFinite(poseA.x) && Number.isFinite(poseA.y) && (
           <circle role="img" aria-label={pair.b ? "A" : "kind" in pair.comparison.lapA ? "Opponent" : `${m.compare_lap_label()} ${pair.comparison.lapA.lapNumber}`} cx={poseA.x} cy={poseA.y} r="3.5" fill={pair.b ? "var(--comparison-lap-a)" : "var(--app-accent)"} stroke="var(--app-bg)" strokeWidth="1.5">
             <title>{pair.b ? "A" : "kind" in pair.comparison.lapA ? "Opponent" : `${m.compare_lap_label()} ${pair.comparison.lapA.lapNumber}`}</title>

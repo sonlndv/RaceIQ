@@ -163,3 +163,18 @@ native-wire import: `server/sandbox-f1/`. Capture regression command:
 
 Private deployment configuration, recordings, credentials and local coaching
 integrations are not published in this branch.
+
+## F1 race feedback and replay
+
+- Current completed rival sectors use explicit car, lap and flashback-generation
+  identity; prior coherent completed laps remain separate from running sectors.
+- Invalid and rewound recordings remain playable across preserved capture-time
+  runs. Replay separates game validity, RaceIQ validation, recording coverage and
+  clean-pace eligibility, and shows available native event evidence.
+- Retirement capture drains scoped session-end and matching unscoped retirement
+  packets before finalization. Recovery binds only uniquely evidenced terminal
+  fragments, retaining original raw bytes and incomplete-lap status.
+- Hosted Dashboard 3/4 and local coaching integration remain deployment-specific;
+  this branch publishes the portable telemetry, replay and recording fixes.
+- Focused verification: 78 tests across F1 sector handling, terminal lifecycle,
+  native-tail recovery, Sandbox history and replay evidence.

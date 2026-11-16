@@ -2,10 +2,14 @@ import type { GameId } from "@raceiq/shared/games/ids";
 import type { ComparisonData } from "@raceiq/shared/racing/comparison/types";
 import type { SemanticLapTelemetry, SemanticReplayFrame } from "../contracts/replay"
 import type { OpponentLapReference, OpponentSemanticLapTelemetry } from "./opponents";
+import type { ReplayEvent } from "./replay-evidence";
 
 /** Native recording samples. NaN denotes unavailable progress, never an index approximation. */
 export interface SpectateSample {
   time: number;
+  /** Original lap-clock seconds; playback time remains monotonic after rewinds. */
+  nativeTime?: number | null;
+  frameIndex?: number;
   distance: number;
   run: number;
   values: Readonly<Record<string, unknown>>;
@@ -22,6 +26,8 @@ export interface SpectateLap {
   /** Authoritative circuit length for locating partial native opponent recordings. */
   trackLengthM?: number;
   hasProgress: boolean;
+  alignmentUnavailable?: string;
+  events?: readonly (ReplayEvent & { time: number | null; run: number | null })[];
   replay: SemanticLapTelemetry | OpponentSemanticLapTelemetry;
 }
 export interface SpectatePose {
@@ -32,6 +38,7 @@ export interface SpectatePose {
 }
 export interface SpectateReading {
   time: number;
+  run?: number;
   distance: number | null;
   pose: SpectatePose | null;
   values: Readonly<Record<string, unknown>>;

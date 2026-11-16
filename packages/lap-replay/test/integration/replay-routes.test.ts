@@ -10,6 +10,7 @@ import { replayRoutes, semanticReplayIds } from "../../server";
 import type { SemanticLapTelemetry } from "../../contracts/replay";
 import type { KunosExtendedData } from "@raceiq/shared/telemetry/kunos";
 
+import { decodeSemanticLapTelemetry, SEMANTIC_REPLAY_MEDIA_TYPE } from "../../contracts/replay-wire";
 initGameAdapters();
 test("semantic replay requests F1 Analyse dependencies", () => {
   const ids = semanticReplayIds("f1-2025");
@@ -85,5 +86,20 @@ describe("GET /api/laps/:id/semantic-telemetry", () => {
       cacheDelete(lapId);
       await deleteSession(sessionId);
     }
+  });
+  test.each([false, true])("keeps invalid rewound attempts replayable with semantic evidence (compact=%s)", async compact => {
+    const sessionId = await insertSession("0", "17", "f1-2025");
+    const lapId = await insertLap(sessionId, 37, 80, false, null, 0, null, null, "rewind", null, null);
+    cacheSet(lapId, [0, 0.05, 0.1, 0.02, 0.07].map((CurrentLap, index) => packet("f1-2025", { TimestampMS: index * 50, CurrentLap, PositionX: index * 2, PositionZ: 5 })));
+    try {
+      const response = await replayRoutes.request(`/api/laps/${lapId}/semantic-telemetry`, { headers: { "X-Game-Id": "f1-2025", ...(compact ? { Accept: SEMANTIC_REPLAY_MEDIA_TYPE } : {}) } });
+      expect(response.status).toBe(200);
+      const body = decodeSemanticLapTelemetry(await response.json());
+      expect(body.envelopes).toHaveLength(5);
+      expect(body.evidence!.raceiqValidation).toMatchObject({ state: "invalid", reason: "rewind" });
+      expect(body.evidence!.recording.state).toBe("partial");
+      expect(body.evidence!.cleanPace.state).toBe("ineligible");
+      expect(body.evidence!.runs.map(run => [run.startFrame, run.endFrame])).toEqual([[0, 2], [3, 4]]);
+    } finally { cacheDelete(lapId); await deleteSession(sessionId); }
   });
 });
