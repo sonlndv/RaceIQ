@@ -144,17 +144,19 @@ RaceIQ is a community project and every contribution helps — whether that's co
 This fork preserves RaceIQ's AGPL-3.0 license and upstream attribution. Branch
 `son/sandbox` starts from upstream commit `44894df1c0846784a9a71fa91a4f19d776b9b774`.
 
-On **Home**, open **Sandbox** directly below **F1 2025** in the sidebar
-(`/f125/sandbox`) for a separately editable dashboard copy. The normal dashboard remains unchanged.
-Sandbox uses the same F1 game identity, authenticated API, dashboard queries and
-recorded-data core; it does not create another database or recording pipeline.
-Records are shared, not disposable Sandbox copies.
-Sandbox displays only F1 2025 game cards. Other games remain available on the
-normal Home dashboard; this restriction does not change global game settings.
+On **Home**, open **Sandbox** directly below **F1 2025** (`/f125/sandbox`).
+Sandbox reviews Austria / Red Bull Ring races (track 17), not Melbourne time trials.
+The normal dashboard and existing player recordings remain unchanged.
 
-Customize `client/src/components/sandbox/SandboxDashboardView.tsx` and
-`SandboxPage.tsx`. Shared loading stays in `HomePageContainer`; the original
-presentation stays in `HomePageView.tsx`.
+Native UDP observation runs independently of browser connections and player-parser
+readiness. Available timing from all 22 car slots is persisted in the additive
+`DATA_DIR/sandbox-f1/history.sqlite` store. Invalid, pit, caution, incomplete and
+flashback attempts remain visible; clean pace is calculated separately.
+Missing telemetry and unknown validity remain explicit, never invented.
+
+UI: `client/src/components/sandbox/`. Capture, authenticated read API and offline
+native-wire import: `server/sandbox-f1/`. Capture regression command:
+`bun test server/sandbox-f1/sandbox-f1.test.ts`.
 
 Private deployment configuration, recordings, credentials and local coaching
 integrations are not published in this branch.

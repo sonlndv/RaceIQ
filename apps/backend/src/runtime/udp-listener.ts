@@ -20,6 +20,7 @@ import { WorkerSessionRecorder } from "@raceiq/capture-formats/session/worker-re
 import type { GameId } from "@raceiq/shared/games/ids";
 import { timestampForFilename } from "@raceiq/backend-core/session-capture/filename";
 import { encodeFrameLength } from "@raceiq/capture-formats/session/framing";
+import { observeSandboxF1Wire, flushSandboxF1, stopSandboxF1 } from "@raceiq/backend-core/sandbox-f1/runtime";
 
 
 const MIN_PACKET_LENGTH = 29; // Minimum: F1 header size
@@ -95,6 +96,7 @@ class UdpListener {
     this._lastStatusAt = performance.now();
     this._lastWsPacketCount = wsManager.packetCount;
     this._statusTimer = setInterval(() => {
+      flushSandboxF1();
       const statusAt = performance.now();
       const elapsedMs = Math.max(1, statusAt - this._lastStatusAt);
       this._lastStatusAt = statusAt;
@@ -207,6 +209,9 @@ class UdpListener {
       return;
     }
 
+    // All-driver capture must precede player parser readiness and recorder filters.
+    observeSandboxF1Wire(sourceFrame, frameTimeMs);
+
     // Append raw datagrams to the dump BEFORE parsing so recordings preserve
     // the exact wire format (including any packets parsePacket would skip).
     this._recorder?.writeRawCaptureRecord(Buffer.concat([encodeFrameLength(sourceFrame.length, frameTimeMs), sourceFrame]));
@@ -229,6 +234,7 @@ class UdpListener {
   }
 
   async stop(): Promise<void> {
+    stopSandboxF1();
     if (this._statusTimer) {
       clearInterval(this._statusTimer);
       this._statusTimer = null;

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { sandboxF1Routes } from "@raceiq/backend-core/sandbox-f1/routes";
 import { cors } from "hono/cors";
 import { errorLogger } from "@raceiq/backend-core/runtime/logger";
 import { IS_DEV, IS_E2E } from "@raceiq/backend-core/runtime/config/env";
@@ -45,6 +46,7 @@ const app = new Hono()
   .route("/", settingsRoutes)
   .route("/", lapRoutes)
   .route("/", driverRoutes)
+  .route("/", sandboxF1Routes)
   .route("/", chatsRoutes)
   .route("/", chatRunRoutes)
   .route("/", dashboardRoutes)

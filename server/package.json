@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./sandbox-f1/routes": "./sandbox-f1/routes.ts",
+    "./sandbox-f1/runtime": "./sandbox-f1/runtime.ts",
     "./ai/agent-stream": "./ai/agent-stream.ts",
     "./ai/ai-features": "./ai/ai-features.ts",
     "./ai/ai-types": "./ai/ai-types.ts",

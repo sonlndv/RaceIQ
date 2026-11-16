@@ -2,7 +2,7 @@ import { tryGetGame } from "@raceiq/shared/games/registry";
 import type { DashboardRecentSession } from "@raceiq/shared/racing/sessions/dashboard";
 import { useQueries } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useMemo, useState, type ComponentType } from "react";
+import { useMemo, useState } from "react";
 import { indexProcessingById, useSessions } from "@/hooks/session-queries";
 import { useDashboard, useDashboardRecap } from "@/hooks/dashboard";
 import { useSettings } from "@/hooks/settings";
@@ -11,7 +11,7 @@ import { client } from "@/lib/rpc";
 import { getGameRoute, useGameId } from "@/stores/game";
 import { rpcJson } from "@/lib/rpc-json";
 import { HomePageView } from "./HomePageView";
-import type { GameStats, HomePageViewProps, PeriodKey } from "./types";
+import type { GameStats, PeriodKey } from "./types";
 import { useDashboardCars } from "@/hooks/dashboard-cars";
 
 function cardStats(cards: Record<string, { laps: number; drivenSeconds: number }>): GameStats {
@@ -20,7 +20,7 @@ function cardStats(cards: Record<string, { laps: number; drivenSeconds: number }
   return { fm: get("fm-2023"), f1: get("f1-2025"), acc: get("acc"), acEvo: get("ac-evo"), iracing: get("iracing"), lmu: get("lmu"), ams2: get("ams2") };
 }
 
-export function HomePageContainer({ view: View = HomePageView }: { view?: ComponentType<HomePageViewProps> } = {}) {
+export function HomePageContainer() {
   const gameId = useGameId();
   const navigate = useNavigate();
   const gameAdapter = gameId ? tryGetGame(gameId) : null;
@@ -105,7 +105,7 @@ export function HomePageContainer({ view: View = HomePageView }: { view?: Compon
     void navigate({ to: `${getGameRoute(session.gameId)}/sessions/${session.id}/analyse` as never });
   };
 
-  return <View
+  return <HomePageView
     gameId={gameId}
     gameDisplayName={gameAdapter?.displayName ?? null}
     response={response}
