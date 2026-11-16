@@ -149,6 +149,8 @@ On **Home**, open **Sandbox** directly below **F1 2025** in the sidebar
 Sandbox uses the same F1 game identity, authenticated API, dashboard queries and
 recorded-data core; it does not create another database or recording pipeline.
 Records are shared, not disposable Sandbox copies.
+Sandbox displays only F1 2025 game cards. Other games remain available on the
+normal Home dashboard; this restriction does not change global game settings.
 
 Customize `client/src/components/sandbox/SandboxDashboardView.tsx` and
 `SandboxPage.tsx`. Shared loading stays in `HomePageContainer`; the original

@@ -17,6 +17,8 @@ import type { HomePageViewProps } from "../home/types";
 import { Link } from "@tanstack/react-router";
 import { getGameRoute } from "@/stores/game";
 
+const hiddenSandboxGames = ["fm-2023", "acc", "ac-evo", "iracing", "lmu", "ams2"];
+
 export function SandboxDashboardView({
   gameId,
   response,
@@ -25,7 +27,6 @@ export function SandboxDashboardView({
   carNames,
   trackNames,
   gameStats,
-  hiddenGames,
   latestSession,
   latestRecap,
   latestRecapLoading,
@@ -129,7 +130,7 @@ export function SandboxDashboardView({
     <div className="min-h-full bg-app-bg text-app-detail">
       <div className="mx-auto max-w-[1400px] space-y-4 px-3 pt-2 pb-3 @3xl/workspace:px-6 @3xl/workspace:pb-6">
         <PeriodSelector periodTab={periodTab} onPeriodTabChange={onPeriodTabChange} />
-        <GameBrandCards gameStats={gameStats} hiddenGames={hiddenGames} loading={lapsLoading || sessionsLoading} error={lapsError || sessionsError} selectedGameId={gameId} />
+        <GameBrandCards gameStats={gameStats} hiddenGames={hiddenSandboxGames} loading={lapsLoading || sessionsLoading} error={lapsError || sessionsError} selectedGameId="f1-2025" />
 
 
         <div className="space-y-4">
