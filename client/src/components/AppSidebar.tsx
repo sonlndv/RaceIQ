@@ -304,7 +304,10 @@ export function AppSidebar({
             {showGameLinks && (
               <div className="min-h-0 flex-1 overflow-y-auto py-2" aria-label={m.label_games()}>
                 {visibleGames.map((game) => (
-                  <SidebarLink key={game.id} collapsed={showCollapsed} icon={Gamepad2} logoSrc={GAME_LOGO_SRC[game.id]} label={game.displayName} to={`/${game.routePrefix}`} onClick={onClose} />
+                  <div key={game.id}>
+                    <SidebarLink collapsed={showCollapsed} icon={Gamepad2} logoSrc={GAME_LOGO_SRC[game.id]} label={game.displayName} to={`/${game.routePrefix}`} onClick={onClose} />
+                    {game.id === "f1-2025" && <SidebarLink collapsed={showCollapsed} icon={FlaskConical} label="Sandbox" to="/f125/sandbox" onClick={onClose} />}
+                  </div>
                 ))}
               </div>
             )}
@@ -314,9 +317,6 @@ export function AppSidebar({
         {activeGame && (
           <div className="min-h-0 flex-1 overflow-y-auto py-2">
             <SidebarLink collapsed={showCollapsed} exact icon={House} label={m.nav_dashboard()} to={`/${activeGame.routePrefix}`} onClick={onClose} />
-            {activeGame.id === "f1-2025" && (
-              <SidebarLink collapsed={showCollapsed} icon={FlaskConical} label="Sandbox" to="/f125/sandbox" onClick={onClose} />
-            )}
             {visibleFeatures.map((feature) => (
               <SidebarLink key={feature.segment} collapsed={showCollapsed} icon={feature.icon} label={feature.label()} to={`/${activeGame.routePrefix}/${feature.segment}`} onClick={onClose} />
             ))}

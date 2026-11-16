@@ -144,8 +144,8 @@ RaceIQ is a community project and every contribution helps — whether that's co
 This fork preserves RaceIQ's AGPL-3.0 license and upstream attribution. Branch
 `son/sandbox` starts from upstream commit `44894df1c0846784a9a71fa91a4f19d776b9b774`.
 
-Open **F1 2025 → Sandbox** (`/f125/sandbox`) for a separately editable copy of the
-current F1 dashboard presentation. The normal dashboard remains unchanged.
+On **Home**, open **Sandbox** directly below **F1 2025** in the sidebar
+(`/f125/sandbox`) for a separately editable dashboard copy. The normal dashboard remains unchanged.
 Sandbox uses the same F1 game identity, authenticated API, dashboard queries and
 recorded-data core; it does not create another database or recording pipeline.
 Records are shared, not disposable Sandbox copies.
