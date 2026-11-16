@@ -314,6 +314,9 @@ export function AppSidebar({
         {activeGame && (
           <div className="min-h-0 flex-1 overflow-y-auto py-2">
             <SidebarLink collapsed={showCollapsed} exact icon={House} label={m.nav_dashboard()} to={`/${activeGame.routePrefix}`} onClick={onClose} />
+            {activeGame.id === "f1-2025" && (
+              <SidebarLink collapsed={showCollapsed} icon={FlaskConical} label="Sandbox" to="/f125/sandbox" onClick={onClose} />
+            )}
             {visibleFeatures.map((feature) => (
               <SidebarLink key={feature.segment} collapsed={showCollapsed} icon={feature.icon} label={feature.label()} to={`/${activeGame.routePrefix}/${feature.segment}`} onClick={onClose} />
             ))}

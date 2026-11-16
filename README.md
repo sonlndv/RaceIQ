@@ -138,3 +138,21 @@ Looking to sponsor this project or interested in a commercial license? Contact *
 ## Contributing
 
 RaceIQ is a community project and every contribution helps — whether that's code, car/track data, tune setups, bug reports, or just telling a friend about it. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture, and how to add support for new games.
+
+## Son's F1 2025 Sandbox
+
+This fork preserves RaceIQ's AGPL-3.0 license and upstream attribution. Branch
+`son/sandbox` starts from upstream commit `44894df1c0846784a9a71fa91a4f19d776b9b774`.
+
+Open **F1 2025 → Sandbox** (`/f125/sandbox`) for a separately editable copy of the
+current F1 dashboard presentation. The normal dashboard remains unchanged.
+Sandbox uses the same F1 game identity, authenticated API, dashboard queries and
+recorded-data core; it does not create another database or recording pipeline.
+Records are shared, not disposable Sandbox copies.
+
+Customize `client/src/components/sandbox/SandboxDashboardView.tsx` and
+`SandboxPage.tsx`. Shared loading stays in `HomePageContainer`; the original
+presentation stays in `HomePageView.tsx`.
+
+Private deployment configuration, recordings, credentials and local coaching
+integrations are not published in this branch.
