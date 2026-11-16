@@ -2,6 +2,9 @@ import { useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { DriverSessionReview } from "./DriverSessionReview";
 import { formatLabel, formatTimestamp, useSandboxSession, useSandboxSessions } from "./session-data";
+import { HomePageContainer } from "../home/HomePageContainer";
+import { HomePageView } from "../home/HomePageView";
+import type { HomePageViewProps } from "../home/types";
 
 const actionClass = "rounded-md border border-app-border px-3 py-2 text-sm text-app-text hover:bg-app-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-app-accent disabled:opacity-50";
 
@@ -22,8 +25,8 @@ function CaptureInstructions() {
   );
 }
 
-/** Read-only Australia review, independent of the normal Home dashboard and its data hooks. */
-export function SandboxPage() {
+/** Additional recorded race detail; the normal dashboard remains the primary view. */
+function AllDriverSessionReview() {
   const sessionsQuery = useSandboxSessions();
   const [chosenSessionId, setChosenSessionId] = useState("");
   const [expandedDrivers, setExpandedDrivers] = useState<Set<string>>(() => new Set());
@@ -158,5 +161,25 @@ export function SandboxPage() {
         )}
       </div>
     </section>
+  );
+}
+
+function SandboxDashboard(props: HomePageViewProps) {
+  return <HomePageView {...props} hiddenGames={["fm-2023", "acc", "ac-evo", "iracing", "lmu", "ams2"]} gameId="f1-2025" />;
+}
+
+export function SandboxPage() {
+  return (
+    <div className="min-h-full min-w-0 bg-app-bg">
+      <header className="mx-auto max-w-[1400px] px-3 pt-4 @3xl/workspace:px-6">
+        <h1 className="text-app-heading font-semibold text-app-text">Sandbox</h1>
+        <p className="text-app-detail text-app-text-muted">F1 2025 dashboard · shared recordings</p>
+      </header>
+      <HomePageContainer view={SandboxDashboard} />
+      <details className="mx-auto max-w-[1400px] px-3 pb-6 @3xl/workspace:px-6">
+        <summary className="cursor-pointer rounded-md border border-app-border p-3 text-app-detail font-semibold text-app-text">All-driver race laps and sectors</summary>
+        <AllDriverSessionReview />
+      </details>
+    </div>
   );
 }

@@ -147,6 +147,9 @@ This fork preserves RaceIQ's AGPL-3.0 license and upstream attribution. Branch
 On **Home**, open **Sandbox** directly below **F1 2025** (`/f125/sandbox`).
 Sandbox reviews Austria / Red Bull Ring races (track 17), not Melbourne time trials.
 The normal dashboard and existing player recordings remain unchanged.
+Sandbox follows the normal dashboard layout (period filters, recap, insights,
+recent sessions and activity), with only the F1 game card. The all-driver race
+review is an expandable section underneath, not a replacement dashboard.
 
 Native UDP observation runs independently of browser connections and player-parser
 readiness. Available timing from all 22 car slots is persisted in the additive
